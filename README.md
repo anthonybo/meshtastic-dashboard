@@ -63,7 +63,7 @@ A real-time web dashboard for monitoring and interacting with your Meshtastic me
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/meshtastic-dashboard.git
+git clone https://github.com/anthonybo/meshtastic-dashboard.git
 cd meshtastic-dashboard
 ```
 
