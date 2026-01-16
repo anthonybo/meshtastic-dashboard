@@ -1,0 +1,11 @@
+{
+  "name": "meshtastic-dashboard-backend",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "nodemon --exec './venv/bin/python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 5001' --watch app --ext py",
+    "dev": "nodemon --exec 'python3 -m uvicorn app.main:app --reload --host 0.0.0.0 --port 5001' --watch app --ext py"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}
