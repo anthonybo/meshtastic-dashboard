@@ -90,7 +90,17 @@ DATABASE_URL=postgresql+asyncpg://yourusername@localhost:5432/meshtastic
 MESHTASTIC_DEVICE_NAME=Meshtastic_XXXX
 ```
 
-To find your device name, you can scan for BLE devices or check your Meshtastic app.
+To find your device name, install the Meshtastic CLI and scan for devices:
+
+```bash
+# Install Meshtastic Python library
+pip install meshtastic
+
+# Scan for BLE devices
+meshtastic --ble-scan
+```
+
+This will show available devices like `Meshtastic_a1b2`. Copy your device name to the `.env` file.
 
 ### 4. Install Dependencies
 
