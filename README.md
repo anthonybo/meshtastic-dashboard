@@ -81,7 +81,7 @@ createdb meshtastic
 cp backend/.env.example backend/.env
 
 # Edit with your settings
-nano backend/.env
+vim backend/.env
 ```
 
 Update the `.env` file:
