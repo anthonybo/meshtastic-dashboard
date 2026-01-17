@@ -135,6 +135,25 @@ async def websocket_endpoint(websocket: WebSocket):
                             "data": {"success": success, "text": text}
                         }))
 
+                elif msg_type == "traceroute":
+                    destination = msg.get("destination")
+                    hop_limit = msg.get("hop_limit", 3)
+                    channel = msg.get("channel", 0)
+
+                    if meshtastic_client.connected and destination:
+                        success = await meshtastic_client.send_traceroute(
+                            destination=destination,
+                            hop_limit=hop_limit,
+                            channel=channel
+                        )
+                        await websocket.send_text(json.dumps({
+                            "type": "traceroute_sent",
+                            "data": {
+                                "success": success,
+                                "destination": destination
+                            }
+                        }))
+
             except json.JSONDecodeError:
                 pass
 

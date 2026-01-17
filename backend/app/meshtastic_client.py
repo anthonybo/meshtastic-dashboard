@@ -82,6 +82,8 @@ class MeshtasticClient:
                 self._handle_telemetry(packet)
             elif portnum == "NODEINFO_APP":
                 self._handle_nodeinfo(packet)
+            elif portnum == "TRACEROUTE_APP":
+                self._handle_traceroute(packet)
         except Exception as e:
             logger.error(f"Error handling packet: {e}")
 
@@ -93,7 +95,11 @@ class MeshtasticClient:
         to_id = packet.get("toId")
         channel = packet.get("channel", 0)
 
-        logger.info(f"Message from {from_id}: {text}")
+        # Determine if this is a broadcast or DM
+        is_broadcast = to_id in (None, "^all", "!ffffffff", 4294967295)
+        msg_type = "BROADCAST" if is_broadcast else f"DM→{to_id}"
+
+        logger.info(f"[MSG] Received {msg_type} from {from_id} on ch{channel}: {text[:50]}{'...' if len(text) > 50 else ''}")
 
         self._schedule_event("message", {
             "from_node_id": from_id,
@@ -150,6 +156,46 @@ class MeshtasticClient:
                 "hw_model": user.get("hwModel"),
                 "timestamp": datetime.now().isoformat()
             })
+
+    def _handle_traceroute(self, packet):
+        """Handle traceroute response packets."""
+        decoded = packet.get("decoded", {})
+        traceroute = decoded.get("traceroute", {})
+        from_id = packet.get("fromId")
+        to_id = packet.get("toId")
+
+        # Extract route information
+        # 'route' contains the forward path node IDs
+        # 'routeBack' contains the return path node IDs
+        # SNR values may also be included (firmware 2.5+)
+        route = traceroute.get("route", [])
+        route_back = traceroute.get("routeBack", [])
+        snr_towards = traceroute.get("snrTowards", [])
+        snr_back = traceroute.get("snrBack", [])
+
+        # Convert node IDs to hex format if they're integers
+        def format_node_id(node_id):
+            if isinstance(node_id, int):
+                # Handle unknown nodes (0xFFFFFFFF)
+                if node_id == 4294967295:
+                    return "unknown"
+                return f"!{node_id:08x}"
+            return node_id
+
+        formatted_route = [format_node_id(n) for n in route]
+        formatted_route_back = [format_node_id(n) for n in route_back]
+
+        logger.info(f"Traceroute response from {from_id}: route={formatted_route}, routeBack={formatted_route_back}")
+
+        self._schedule_event("traceroute", {
+            "from_node_id": from_id,
+            "to_node_id": to_id,
+            "route": formatted_route,
+            "route_back": formatted_route_back,
+            "snr_towards": list(snr_towards) if snr_towards else [],
+            "snr_back": list(snr_back) if snr_back else [],
+            "timestamp": datetime.now().isoformat()
+        })
 
 
     def _on_connection(self, interface, topic=pub.AUTO_TOPIC):
@@ -250,12 +296,20 @@ class MeshtasticClient:
         """Create a callback function for ACK/NAK handling."""
         def on_response(packet):
             try:
+                logger.debug(f"[ACK] Response packet received for {destination}: {packet}")
+
                 # Check if this is an ACK or NAK
-                routing = packet.get("decoded", {}).get("routing", {})
+                decoded = packet.get("decoded", {})
+                routing = decoded.get("routing", {})
                 error_reason = routing.get("errorReason")
 
+                # Log packet details for debugging
+                packet_type = packet.get("decoded", {}).get("portnum", "unknown")
+                from_id = packet.get("fromId", "unknown")
+                logger.debug(f"[ACK] Packet type={packet_type}, from={from_id}, routing={routing}")
+
                 if error_reason is None or error_reason == "NONE":
-                    logger.info(f"✓ ACK received for message to {destination} - DELIVERED")
+                    logger.info(f"[ACK] ✓ Message to {destination} DELIVERED")
                     self._schedule_event("ack", {
                         "to_node_id": destination,
                         "text": text,
@@ -263,7 +317,7 @@ class MeshtasticClient:
                         "timestamp": datetime.now().isoformat()
                     })
                 else:
-                    logger.warning(f"NAK received for message to {destination}: {error_reason}")
+                    logger.warning(f"[ACK] ✗ Message to {destination} FAILED: {error_reason}")
                     self._schedule_event("ack", {
                         "to_node_id": destination,
                         "text": text,
@@ -272,7 +326,7 @@ class MeshtasticClient:
                         "timestamp": datetime.now().isoformat()
                     })
             except Exception as e:
-                logger.error(f"Error in ACK callback: {e}")
+                logger.error(f"[ACK] Error in callback: {e}", exc_info=True)
 
         return on_response
 
@@ -283,29 +337,180 @@ class MeshtasticClient:
             return False
 
         try:
+            from meshtastic import portnums_pb2
+
             loop = asyncio.get_event_loop()
+
+            # For broadcasts, use "^all" instead of None
+            dest_id = destination if destination else "^all"
+            is_broadcast = destination is None
 
             # Create callback for ACK handling (only for DMs, not broadcasts)
             on_response = None
-            if destination:
+            if not is_broadcast:
                 on_response = self._create_ack_callback(destination, text)
 
-            # sendText with onResponse callback for ACK handling
+            # Use sendData directly instead of sendText to access onResponseAckPermitted
+            # This is required to get ACK/NAK callbacks to fire
+            text_bytes = text.encode("utf-8")
+
             await loop.run_in_executor(
                 None,
-                lambda: self.interface.sendText(
-                    text,
-                    destinationId=destination,
+                lambda: self.interface.sendData(
+                    text_bytes,
+                    destinationId=dest_id,
+                    portNum=portnums_pb2.PortNum.TEXT_MESSAGE_APP,
                     channelIndex=channel,
-                    wantAck=destination is not None,  # Only request ACK for DMs
-                    onResponse=on_response
+                    wantAck=not is_broadcast,  # Only request ACK for DMs
+                    wantResponse=False,
+                    onResponse=on_response,
+                    onResponseAckPermitted=True  # Required for ACK/NAK callbacks to fire
                 )
             )
 
-            logger.info(f"Sent message to {destination or 'broadcast'}: {text}")
+            if is_broadcast:
+                logger.info(f"[MSG] Sent broadcast on channel {channel}: {text[:50]}...")
+            else:
+                logger.info(f"[MSG] Sent DM to {destination} (wantAck=True): {text[:50]}...")
             return True
         except Exception as e:
-            logger.error(f"Failed to send message: {e}")
+            logger.error(f"[MSG] Failed to send message: {e}", exc_info=True)
+            return False
+
+    def _create_traceroute_response_handler(self, destination: str):
+        """Create a response handler for traceroute that sends results via WebSocket."""
+        def on_response(packet):
+            try:
+                logger.info(f"Traceroute response received for {destination}: {packet}")
+                decoded = packet.get("decoded", {})
+
+                # Check for routing error
+                routing = decoded.get("routing", {})
+                error_reason = routing.get("errorReason")
+                if error_reason and error_reason != "NONE":
+                    logger.warning(f"Traceroute to {destination} failed: {error_reason}")
+                    self._schedule_event("traceroute_error", {
+                        "destination": destination,
+                        "error": str(error_reason),
+                        "timestamp": datetime.now().isoformat()
+                    })
+                    return
+
+                # Parse traceroute data
+                traceroute = decoded.get("traceroute", {})
+                if traceroute:
+                    from_id = packet.get("fromId")
+                    to_id = packet.get("toId")
+                    route = traceroute.get("route", [])
+                    route_back = traceroute.get("routeBack", [])
+                    snr_towards = traceroute.get("snrTowards", [])
+                    snr_back = traceroute.get("snrBack", [])
+
+                    def format_node_id(node_id):
+                        if isinstance(node_id, int):
+                            if node_id == 4294967295:
+                                return "unknown"
+                            return f"!{node_id:08x}"
+                        return node_id
+
+                    formatted_route = [format_node_id(n) for n in route]
+                    formatted_route_back = [format_node_id(n) for n in route_back]
+
+                    logger.info(f"Traceroute result: {from_id} route={formatted_route}")
+
+                    self._schedule_event("traceroute", {
+                        "from_node_id": from_id,
+                        "to_node_id": to_id,
+                        "route": formatted_route,
+                        "route_back": formatted_route_back,
+                        "snr_towards": list(snr_towards) if snr_towards else [],
+                        "snr_back": list(snr_back) if snr_back else [],
+                        "timestamp": datetime.now().isoformat()
+                    })
+            except Exception as e:
+                logger.error(f"Error handling traceroute response: {e}", exc_info=True)
+
+        return on_response
+
+    async def _run_traceroute_async(self, destination: str, dest_int: int, hop_limit: int, channel: int):
+        """Run traceroute in background. Handles response/timeout via WebSocket."""
+        from meshtastic import mesh_pb2, portnums_pb2
+
+        loop = asyncio.get_event_loop()
+        try:
+            # Create our own response handler
+            on_response = self._create_traceroute_response_handler(destination)
+
+            # Use sendData directly instead of sendTraceRoute so we control the callback
+            r = mesh_pb2.RouteDiscovery()
+
+            await loop.run_in_executor(
+                None,
+                lambda: self.interface.sendData(
+                    r,
+                    destinationId=dest_int,
+                    portNum=portnums_pb2.PortNum.TRACEROUTE_APP,
+                    wantResponse=True,
+                    onResponse=on_response,
+                    channelIndex=channel,
+                    hopLimit=hop_limit,
+                )
+            )
+
+            # Wait for the response (library's waitForTraceRoute logic)
+            wait_factor = min(len(self.interface.nodes) - 1 if self.interface.nodes else 0, hop_limit)
+            await loop.run_in_executor(
+                None,
+                lambda: self.interface.waitForTraceRoute(wait_factor)
+            )
+
+            logger.info(f"Traceroute to {destination} completed")
+        except Exception as trace_err:
+            # Check if it's a timeout error
+            error_msg = str(trace_err).lower()
+            if "timeout" in error_msg or "timed out" in error_msg:
+                logger.warning(f"Traceroute to {destination} timed out")
+                self._schedule_event("traceroute_error", {
+                    "destination": destination,
+                    "error": "TIMEOUT",
+                    "timestamp": datetime.now().isoformat()
+                })
+            else:
+                logger.error(f"Traceroute to {destination} failed: {trace_err}")
+                self._schedule_event("traceroute_error", {
+                    "destination": destination,
+                    "error": str(trace_err),
+                    "timestamp": datetime.now().isoformat()
+                })
+
+    async def send_traceroute(self, destination: str, hop_limit: int = 3, channel: int = 0) -> bool:
+        """Send a traceroute request to a destination node.
+
+        Returns immediately after dispatching. Response comes via WebSocket.
+        """
+        if not self.connected:
+            logger.error("Not connected to device")
+            return False
+
+        try:
+            # Convert destination to int if it's a hex string like "!abcd1234"
+            if isinstance(destination, str) and destination.startswith("!"):
+                dest_int = int(destination[1:], 16)
+            else:
+                dest_int = int(destination)
+
+            logger.info(f"Sending traceroute to {destination} (hop_limit={hop_limit}, channel={channel})")
+
+            # Create background task - don't await it, let it run independently
+            asyncio.create_task(
+                self._run_traceroute_async(destination, dest_int, hop_limit, channel)
+            )
+
+            logger.info(f"Traceroute request dispatched to {destination}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to send traceroute: {e}")
             return False
 
     def get_connection_status(self) -> dict:

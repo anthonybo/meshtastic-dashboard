@@ -54,14 +54,17 @@
           <div v-if="messagesStore.conversations.length === 0" class="p-3 text-center text-gray-500 text-xs">
             No DM conversations yet
           </div>
-          <button
+          <div
             v-for="conv in messagesStore.conversations"
             :key="conv.nodeId"
-            @click="messagesStore.setSelectedConversation(conv.nodeId)"
-            class="w-full flex items-center gap-2 px-2 py-2 text-left hover:bg-gray-700 transition-colors border-b border-gray-600"
+            class="w-full flex items-center gap-2 px-2 py-2 text-left hover:bg-gray-700 transition-colors border-b border-gray-600 group"
             :class="messagesStore.viewMode === 'dm' && messagesStore.selectedConversation === conv.nodeId ? 'bg-gray-700' : ''"
           >
-            <div class="relative flex-shrink-0">
+            <button
+              @click="messagesStore.setSelectedConversation(conv.nodeId)"
+              class="relative flex-shrink-0"
+              :title="getNodeTooltip(conv.nodeId)"
+            >
               <div class="w-8 h-8 rounded-full bg-mesh-600 flex items-center justify-center">
                 <span class="text-white text-xs font-bold">{{ getNodeInitials(conv.nodeId) }}</span>
               </div>
@@ -69,8 +72,11 @@
               <div class="absolute -bottom-0.5 -right-0.5">
                 <NodeStatusIndicator :node-id="conv.nodeId" size="sm" :pulse="true" />
               </div>
-            </div>
-            <div class="min-w-0 flex-1">
+            </button>
+            <button
+              @click="messagesStore.setSelectedConversation(conv.nodeId)"
+              class="min-w-0 flex-1 text-left"
+            >
               <div class="flex items-center justify-between">
                 <span class="text-white text-xs font-medium truncate">{{ getNodeName(conv.nodeId) }}</span>
                 <span class="text-gray-500 text-xs flex-shrink-0 ml-1">{{ formatTimeShort(conv.lastTimestamp) }}</span>
@@ -102,8 +108,20 @@
                   </span>
                 </div>
               </div>
-            </div>
-          </button>
+            </button>
+            <!-- Map button (shows on hover) -->
+            <button
+              v-if="getNodePosition(conv.nodeId)"
+              @click.stop="viewNodeOnMap(conv.nodeId)"
+              class="flex-shrink-0 p-1 text-gray-500 hover:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity"
+              title="View on map"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -123,16 +141,41 @@
             </svg>
             Broadcast
           </span>
-          <!-- DM badge with status -->
+          <!-- DM badge with status and action icons -->
           <template v-else>
             <NodeStatusIndicator :node-id="messagesStore.selectedConversation" size="md" show-label />
+            <!-- Info icon -->
+            <button
+              @click="showNodeInfo(messagesStore.selectedConversation)"
+              class="p-1.5 text-gray-400 hover:text-cyan-400 hover:bg-gray-700 rounded transition-colors"
+              title="View node info"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </button>
+            <!-- Map icon -->
+            <button
+              v-if="getNodePosition(messagesStore.selectedConversation)"
+              @click="viewNodeOnMap(messagesStore.selectedConversation)"
+              class="p-1.5 text-gray-400 hover:text-blue-400 hover:bg-gray-700 rounded transition-colors"
+              title="View on map"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+              </svg>
+            </button>
           </template>
         </div>
 
-        <!-- Node ID for DM -->
-        <span v-if="messagesStore.viewMode === 'dm'" class="text-xs text-gray-500 font-mono">
-          {{ messagesStore.selectedConversation }}
-        </span>
+        <!-- Node ID and info for DM -->
+        <div v-if="messagesStore.viewMode === 'dm'" class="flex items-center gap-3">
+          <div class="text-right text-xs">
+            <div class="text-gray-400">{{ getNodeModel(messagesStore.selectedConversation) }}</div>
+            <div class="text-gray-500 font-mono">{{ messagesStore.selectedConversation }}</div>
+          </div>
+        </div>
       </div>
 
       <!-- Messages -->
@@ -165,8 +208,31 @@
               class="max-w-[80%] rounded-lg px-4 py-2"
               :class="message.is_outgoing ? 'bg-mesh-600 text-white' : 'bg-gray-700 text-white'"
             >
-              <div v-if="!message.is_outgoing && messagesStore.viewMode === 'channel'" class="text-xs text-gray-400 mb-1">
-                {{ getNodeName(message.from_node_id) }}
+              <!-- Sender info for channel messages (shows name + icons since multiple senders) -->
+              <div v-if="!message.is_outgoing && messagesStore.viewMode === 'channel'" class="text-xs mb-1 flex items-center gap-2">
+                <span class="text-cyan-400">{{ getNodeName(message.from_node_id) }}</span>
+                <!-- Info icon -->
+                <button
+                  @click="showNodeInfo(message.from_node_id)"
+                  class="text-gray-500 hover:text-cyan-400 transition-colors"
+                  :title="getNodeTooltip(message.from_node_id)"
+                >
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  </svg>
+                </button>
+                <!-- Map icon -->
+                <button
+                  v-if="getNodePosition(message.from_node_id)"
+                  @click="viewNodeOnMap(message.from_node_id)"
+                  class="text-gray-500 hover:text-blue-400 transition-colors"
+                  title="View on map"
+                >
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                  </svg>
+                </button>
               </div>
               <p class="text-sm whitespace-pre-wrap break-words">{{ message.text }}</p>
               <div class="flex items-center justify-end gap-2 mt-1">
@@ -255,22 +321,127 @@
         </div>
       </div>
     </div>
+
+    <!-- Node Info Modal -->
+    <div
+      v-if="selectedNodeInfo"
+      class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+      @click.self="closeNodeInfo"
+    >
+      <div class="bg-gray-800 rounded-lg border border-gray-700 shadow-xl w-80 max-w-[90vw]">
+        <!-- Header -->
+        <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+          <h3 class="font-semibold text-white">Node Info</h3>
+          <button
+            @click="closeNodeInfo"
+            class="text-gray-400 hover:text-white transition-colors"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Content -->
+        <div class="p-4 space-y-3">
+          <!-- Name & Status -->
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-full bg-mesh-600 flex items-center justify-center flex-shrink-0">
+              <span class="text-white font-bold">{{ getNodeInitials(selectedNodeInfo.id) }}</span>
+            </div>
+            <div>
+              <div class="text-white font-medium">{{ selectedNodeInfo.long_name || selectedNodeInfo.short_name || 'Unknown' }}</div>
+              <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full" :class="selectedNodeInfo.statusColor"></span>
+                <span class="text-sm text-gray-400">{{ selectedNodeInfo.status }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Details Grid -->
+          <div class="grid grid-cols-2 gap-2 text-sm">
+            <div class="bg-gray-700/50 rounded px-2 py-1.5">
+              <div class="text-gray-500 text-xs">Node ID</div>
+              <div class="text-white font-mono text-xs truncate">{{ selectedNodeInfo.id }}</div>
+            </div>
+            <div class="bg-gray-700/50 rounded px-2 py-1.5">
+              <div class="text-gray-500 text-xs">Model</div>
+              <div class="text-white">{{ selectedNodeInfo.hw_model || 'Unknown' }}</div>
+            </div>
+            <div class="bg-gray-700/50 rounded px-2 py-1.5">
+              <div class="text-gray-500 text-xs">Last Heard</div>
+              <div class="text-white">{{ formatLastHeard(selectedNodeInfo.last_heard) }}</div>
+            </div>
+            <div class="bg-gray-700/50 rounded px-2 py-1.5">
+              <div class="text-gray-500 text-xs">Battery</div>
+              <div class="text-white">{{ selectedNodeInfo.battery_level ? `${selectedNodeInfo.battery_level}%` : 'N/A' }}</div>
+            </div>
+            <div v-if="selectedNodeInfo.snr != null" class="bg-gray-700/50 rounded px-2 py-1.5">
+              <div class="text-gray-500 text-xs">SNR</div>
+              <div class="text-white">{{ selectedNodeInfo.snr.toFixed(1) }} dB</div>
+            </div>
+            <div v-if="selectedNodeInfo.hops_away != null" class="bg-gray-700/50 rounded px-2 py-1.5">
+              <div class="text-gray-500 text-xs">Hops Away</div>
+              <div class="text-white">{{ selectedNodeInfo.hops_away }}</div>
+            </div>
+          </div>
+
+          <!-- Location -->
+          <div v-if="selectedNodeInfo.latitude && selectedNodeInfo.longitude" class="bg-gray-700/50 rounded px-2 py-1.5">
+            <div class="text-gray-500 text-xs">Location</div>
+            <div class="text-white text-sm">
+              {{ selectedNodeInfo.latitude.toFixed(5) }}, {{ selectedNodeInfo.longitude.toFixed(5) }}
+              <span v-if="selectedNodeInfo.altitude" class="text-gray-400">
+                ({{ selectedNodeInfo.altitude }}m / {{ Math.round(selectedNodeInfo.altitude * 3.28084) }}ft)
+              </span>
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex gap-2 pt-2">
+            <button
+              v-if="getNodePosition(selectedNodeInfo.id)"
+              @click="viewNodeOnMap(selectedNodeInfo.id); closeNodeInfo()"
+              class="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+              </svg>
+              View on Map
+            </button>
+            <button
+              @click="messagesStore.setSelectedConversation(selectedNodeInfo.id); closeNodeInfo()"
+              class="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-mesh-600 hover:bg-mesh-700 text-white rounded-lg transition-colors text-sm"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+              </svg>
+              Send DM
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useMessagesStore } from '../stores/messages'
 import { useConnectionStore } from '../stores/connection'
 import { useNodesStore } from '../stores/nodes'
 import NodeStatusIndicator from './NodeStatusIndicator.vue'
 
+const router = useRouter()
 const messagesStore = useMessagesStore()
 const connectionStore = useConnectionStore()
 const nodesStore = useNodesStore()
 
 const messageText = ref('')
 const messagesContainer = ref(null)
+const selectedNodeInfo = ref(null)
 
 const displayMessages = computed(() => {
   return [...messagesStore.conversationMessages].reverse()
@@ -336,6 +507,81 @@ function getNodeInitials(nodeId) {
     return name.slice(-2).toUpperCase()
   }
   return name.slice(0, 2).toUpperCase()
+}
+
+function getNodePosition(nodeId) {
+  if (!nodeId) return null
+  const node = nodesStore.getNode(nodeId)
+  if (node?.latitude && node?.longitude) {
+    return { lat: node.latitude, lng: node.longitude }
+  }
+  return null
+}
+
+function getNodeModel(nodeId) {
+  if (!nodeId) return ''
+  const node = nodesStore.getNode(nodeId)
+  return node?.hw_model || ''
+}
+
+function getNodeTooltip(nodeId) {
+  if (!nodeId) return ''
+  const node = nodesStore.getNode(nodeId)
+  if (!node) return nodeId
+
+  const parts = [node.long_name || node.short_name || nodeId]
+  if (node.hw_model) parts.push(`Model: ${node.hw_model}`)
+  if (node.latitude && node.longitude) {
+    parts.push(`Location: ${node.latitude.toFixed(4)}, ${node.longitude.toFixed(4)}`)
+  }
+  if (node.battery_level) parts.push(`Battery: ${node.battery_level}%`)
+  const status = nodesStore.getStatusText(node)
+  parts.push(`Status: ${status}`)
+
+  return parts.join('\n')
+}
+
+function viewNodeOnMap(nodeId) {
+  const pos = getNodePosition(nodeId)
+  if (pos) {
+    // Navigate to map with node focused
+    router.push({
+      path: '/map',
+      query: { node: nodeId, lat: pos.lat, lng: pos.lng }
+    })
+  }
+}
+
+function showNodeInfo(nodeId) {
+  const node = nodesStore.getNode(nodeId)
+  if (node) {
+    selectedNodeInfo.value = {
+      id: nodeId,
+      ...node,
+      status: nodesStore.getStatusText(node),
+      statusColor: nodesStore.getStatusColor(node)
+    }
+  }
+}
+
+function closeNodeInfo() {
+  selectedNodeInfo.value = null
+}
+
+function formatLastHeard(timestamp) {
+  if (!timestamp) return 'Never'
+  const date = new Date(timestamp)
+  const now = new Date()
+  const diffMs = now - date
+  const diffMins = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMs / 3600000)
+  const diffDays = Math.floor(diffMs / 86400000)
+
+  if (diffMins < 1) return 'Just now'
+  if (diffMins < 60) return `${diffMins}m ago`
+  if (diffHours < 24) return `${diffHours}h ago`
+  if (diffDays < 7) return `${diffDays}d ago`
+  return date.toLocaleDateString()
 }
 
 function formatTime(timestamp) {

@@ -119,3 +119,30 @@ async def sync_nodes(db: AsyncSession = Depends(get_db)):
 
     await db.commit()
     return {"synced": synced_count}
+
+
+@router.post("/{node_id}/traceroute")
+async def send_traceroute(node_id: str, hop_limit: int = 3, channel: int = 0):
+    """Send a traceroute request to a specific node.
+
+    The response will be sent via WebSocket when received.
+    """
+    if not meshtastic_client.connected:
+        raise HTTPException(status_code=503, detail="Not connected to device")
+
+    success = await meshtastic_client.send_traceroute(
+        destination=node_id,
+        hop_limit=hop_limit,
+        channel=channel
+    )
+
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to send traceroute request")
+
+    return {
+        "status": "sent",
+        "destination": node_id,
+        "hop_limit": hop_limit,
+        "channel": channel,
+        "message": "Traceroute request sent. Response will be delivered via WebSocket."
+    }

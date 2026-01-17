@@ -14,6 +14,13 @@ export const useNodesStore = defineStore('nodes', () => {
   const pollInterval = ref(null)
   const lastPollTime = ref(null)
 
+  // Traceroute state
+  const tracerouteInProgress = ref(false)
+  const tracerouteTarget = ref(null)
+  const tracerouteResult = ref(null)
+  const tracerouteError = ref(null)
+  let tracerouteTimeout = null // Timeout handle for traceroute
+
   // Get node status based on last_heard
   // isConnectedDevice flag indicates this is the device we're directly connected to
   function getNodeStatus(node, isConnectedDevice = false) {
@@ -247,6 +254,102 @@ export const useNodesStore = defineStore('nodes', () => {
     }
   }
 
+  // Send traceroute request to a node
+  async function sendTraceroute(nodeId, hopLimit = 3, channel = 0) {
+    // Clear any existing timeout
+    if (tracerouteTimeout) {
+      clearTimeout(tracerouteTimeout)
+      tracerouteTimeout = null
+    }
+
+    tracerouteInProgress.value = true
+    tracerouteTarget.value = nodeId
+    tracerouteResult.value = null
+    tracerouteError.value = null
+
+    try {
+      const response = await axios.post(`/api/nodes/${encodeURIComponent(nodeId)}/traceroute`, null, {
+        params: { hop_limit: hopLimit, channel }
+      })
+      console.log('[nodes] Traceroute request sent:', response.data)
+
+      // Set a 30-second timeout for the response
+      tracerouteTimeout = setTimeout(() => {
+        if (tracerouteInProgress.value && tracerouteTarget.value === nodeId) {
+          console.log('[nodes] Traceroute timed out for:', nodeId)
+          tracerouteError.value = 'Traceroute timed out - node may be offline or unreachable'
+          tracerouteInProgress.value = false
+        }
+      }, 30000) // 30 seconds
+
+      return true
+    } catch (err) {
+      console.error('[nodes] Failed to send traceroute:', err)
+      tracerouteError.value = err.message
+      tracerouteInProgress.value = false
+      return false
+    }
+  }
+
+  // Handle traceroute response from WebSocket
+  function handleTracerouteResponse(data) {
+    console.log('[nodes] Traceroute response received:', data)
+
+    // Clear the timeout since we got a response
+    if (tracerouteTimeout) {
+      clearTimeout(tracerouteTimeout)
+      tracerouteTimeout = null
+    }
+
+    tracerouteResult.value = {
+      from: data.from_node_id,
+      to: data.to_node_id,
+      route: data.route || [],
+      routeBack: data.route_back || [],
+      snrTowards: data.snr_towards || [],
+      snrBack: data.snr_back || [],
+      timestamp: data.timestamp
+    }
+    tracerouteInProgress.value = false
+  }
+
+  // Handle traceroute error from WebSocket (routing error, timeout, etc.)
+  function handleTracerouteError(data) {
+    console.log('[nodes] Traceroute error received:', data)
+
+    // Clear the timeout
+    if (tracerouteTimeout) {
+      clearTimeout(tracerouteTimeout)
+      tracerouteTimeout = null
+    }
+
+    // Map Meshtastic error codes to user-friendly messages
+    const errorMessages = {
+      'NO_ROUTE': 'No route to destination - node may be offline',
+      'TIMEOUT': 'Request timed out - node did not respond',
+      'NO_RESPONSE': 'No response from node',
+      'MAX_RETRANSMIT': 'Maximum retransmits exceeded - node unreachable',
+      'GOT_NAK': 'Received NAK - node rejected request',
+      'NO_CHANNEL': 'No channel available'
+    }
+
+    const errorCode = data.error || 'UNKNOWN'
+    tracerouteError.value = errorMessages[errorCode] || `Traceroute failed: ${errorCode}`
+    tracerouteInProgress.value = false
+  }
+
+  // Clear traceroute results
+  function clearTraceroute() {
+    if (tracerouteTimeout) {
+      clearTimeout(tracerouteTimeout)
+      tracerouteTimeout = null
+    }
+    tracerouteInProgress.value = false
+    tracerouteTarget.value = null
+    tracerouteResult.value = null
+    tracerouteError.value = null
+  }
+
   return {
     nodes,
     nodeList,
@@ -259,6 +362,12 @@ export const useNodesStore = defineStore('nodes', () => {
     loading,
     error,
     lastPollTime,
+    // Traceroute
+    tracerouteInProgress,
+    tracerouteTarget,
+    tracerouteResult,
+    tracerouteError,
+    // Methods
     fetchNodes,
     syncNodes,
     updateNode,
@@ -271,6 +380,10 @@ export const useNodesStore = defineStore('nodes', () => {
     getStatusColor,
     getStatusText,
     startPolling,
-    stopPolling
+    stopPolling,
+    sendTraceroute,
+    handleTracerouteResponse,
+    handleTracerouteError,
+    clearTraceroute
   }
 })

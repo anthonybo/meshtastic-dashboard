@@ -45,14 +45,21 @@ async def send_message(message: MessageCreate, db: AsyncSession = Depends(get_db
     if not meshtastic_client.connected:
         raise HTTPException(status_code=503, detail="Not connected to device")
 
+    logger.info(f"Sending message: text='{message.text}', to={message.to_node_id}, channel={message.channel}")
+
     # Send via Meshtastic
-    success = await meshtastic_client.send_message(
-        text=message.text,
-        destination=message.to_node_id,
-        channel=message.channel
-    )
+    try:
+        success = await meshtastic_client.send_message(
+            text=message.text,
+            destination=message.to_node_id,
+            channel=message.channel
+        )
+    except Exception as e:
+        logger.error(f"Exception sending message: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to send message: {str(e)}")
 
     if not success:
+        logger.error("send_message returned False")
         raise HTTPException(status_code=500, detail="Failed to send message")
 
     # Store in database

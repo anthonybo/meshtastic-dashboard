@@ -28,6 +28,20 @@ A real-time web dashboard for monitoring and interacting with your Meshtastic me
 - **Node Markers** - Color-coded by hop count (direct, 1-2 hops, 3-4 hops, 5+ hops)
 - **Status Indicators** - Pulsing indicators show online/offline status
 - **Quick Actions** - Message nodes directly from the map
+- **Traceroute Visualization** - See the path your messages take through the mesh
+- **Altitude Display** - View node elevation in both meters and feet
+
+### Traceroute
+- **Route Discovery** - Trace the path to any node in your mesh
+- **Hop Visualization** - See intermediate nodes on the map
+- **SNR Data** - View signal-to-noise ratios along the route
+- **Timeout Handling** - Graceful handling of unreachable nodes
+
+### Node Information
+- **Quick Info Modal** - Click info icon to see detailed node data
+- **Live Status** - Online/offline status with last heard time
+- **Hardware Info** - Device model, battery level, signal strength
+- **Location Data** - GPS coordinates with altitude
 
 ## Architecture
 
@@ -157,6 +171,18 @@ npm run start:backend
 npm run start:frontend
 ```
 
+### Logging
+
+Logs are written to `backend/logs/meshtastic_dashboard.log` with automatic rotation:
+- Maximum file size: 5MB
+- Keeps 1 backup file (total max 10MB)
+- Clear labels: `[MSG]` for messages, `[ACK]` for acknowledgments
+
+```bash
+# View logs in real-time
+tail -f backend/logs/meshtastic_dashboard.log
+```
+
 ### API Endpoints
 
 | Endpoint | Method | Description |
@@ -165,8 +191,11 @@ npm run start:frontend
 | `/api/connection/connect` | POST | Connect to device |
 | `/api/connection/disconnect` | POST | Disconnect from device |
 | `/api/nodes` | GET | Get all nodes |
+| `/api/nodes/live` | GET | Get live node data from device |
+| `/api/nodes/{id}/traceroute` | POST | Send traceroute to a node |
 | `/api/messages` | GET | Get message history |
 | `/api/messages` | POST | Send a message |
+| `/api/messages/channels` | GET | Get available channels |
 | `/ws` | WebSocket | Real-time updates |
 
 ## Telemetry Thresholds

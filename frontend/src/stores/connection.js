@@ -178,6 +178,19 @@ export const useConnectionStore = defineStore('connection', () => {
         // Update message ACK status in store
         messagesStore.markMessageAcked(message.data)
         break
+      case 'traceroute':
+        // Handle traceroute response
+        nodesStore.handleTracerouteResponse(message.data)
+        break
+      case 'traceroute_error':
+        // Handle traceroute error/timeout from backend
+        console.log('Traceroute error:', message.data)
+        nodesStore.handleTracerouteError(message.data)
+        break
+      case 'traceroute_sent':
+        // Traceroute request was sent successfully
+        console.log('Traceroute sent:', message.data)
+        break
     }
   }
 

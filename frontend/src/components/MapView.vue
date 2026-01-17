@@ -1,19 +1,119 @@
 <template>
   <div class="h-full w-full rounded-lg overflow-hidden border border-gray-700 relative">
     <div ref="mapContainer" class="h-full w-full"></div>
-    <!-- My Device Button -->
-    <button
-      v-if="myNodeWithPosition"
-      @click="zoomToMyDevice"
-      class="absolute top-3 right-3 z-[1000] flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-mesh-500 text-white text-sm rounded-lg shadow-lg transition-colors"
-      title="Zoom to my device"
+
+    <!-- Map Controls -->
+    <div class="absolute top-3 right-3 z-[1000] flex flex-col gap-2">
+      <!-- My Device Button -->
+      <button
+        v-if="myNodeWithPosition"
+        @click="zoomToMyDevice"
+        class="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-mesh-500 text-white text-sm rounded-lg shadow-lg transition-colors"
+        title="Zoom to my device"
+      >
+        <svg class="w-4 h-4 text-mesh-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+        My Device
+      </button>
+
+      <!-- Clear Traceroute Button -->
+      <button
+        v-if="nodesStore.tracerouteResult"
+        @click="clearTraceroute"
+        class="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-orange-500 text-white text-sm rounded-lg shadow-lg transition-colors"
+        title="Clear traceroute"
+      >
+        <svg class="w-4 h-4 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+        Clear Route
+      </button>
+    </div>
+
+    <!-- Traceroute Status Panel -->
+    <div
+      v-if="nodesStore.tracerouteInProgress || nodesStore.tracerouteResult || nodesStore.tracerouteError"
+      class="absolute bottom-3 left-3 z-[1000] bg-gray-800 border border-gray-600 rounded-lg shadow-lg p-3 max-w-xs"
     >
-      <svg class="w-4 h-4 text-mesh-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
-      </svg>
-      My Device
-    </button>
+      <!-- In Progress -->
+      <div v-if="nodesStore.tracerouteInProgress" class="flex items-center gap-2 text-yellow-400">
+        <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        <span class="text-sm">Tracing route to {{ getNodeName(nodesStore.tracerouteTarget) }}...</span>
+      </div>
+
+      <!-- Error State -->
+      <div v-else-if="nodesStore.tracerouteError" class="space-y-2">
+        <div class="flex items-center gap-2 text-red-400">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          <span class="text-sm font-medium">Traceroute Failed</span>
+        </div>
+        <div class="text-xs text-gray-400">
+          {{ nodesStore.tracerouteError }}
+        </div>
+        <button
+          @click="clearTraceroute"
+          class="text-xs text-gray-400 hover:text-white underline"
+        >
+          Dismiss
+        </button>
+      </div>
+
+      <!-- Results -->
+      <div v-else-if="nodesStore.tracerouteResult" class="space-y-2">
+        <div class="flex items-center gap-2 text-green-400">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
+          </svg>
+          <span class="text-sm font-medium">Route Found</span>
+        </div>
+
+        <!-- Route Path -->
+        <div class="text-xs text-gray-300 space-y-1">
+          <div class="flex items-center gap-1 flex-wrap">
+            <span class="text-cyan-400">{{ getNodeName(myNodeId) }}</span>
+            <template v-for="(hop, i) in nodesStore.tracerouteResult.route" :key="'route-'+i">
+              <span class="text-gray-500">→</span>
+              <span :class="hop === 'unknown' ? 'text-gray-500 italic' : 'text-white'">
+                {{ hop === 'unknown' ? '?' : getNodeName(hop) }}
+              </span>
+              <span v-if="nodesStore.tracerouteResult.snrTowards[i]" class="text-gray-500 text-[10px]">
+                ({{ nodesStore.tracerouteResult.snrTowards[i] }}dB)
+              </span>
+            </template>
+            <span class="text-gray-500">→</span>
+            <span class="text-orange-400">{{ getNodeName(nodesStore.tracerouteResult.from) }}</span>
+          </div>
+
+          <!-- Return path if available -->
+          <div v-if="nodesStore.tracerouteResult.routeBack.length > 0" class="flex items-center gap-1 flex-wrap mt-1 pt-1 border-t border-gray-700">
+            <span class="text-gray-500 text-[10px]">Return:</span>
+            <span class="text-orange-400">{{ getNodeName(nodesStore.tracerouteResult.from) }}</span>
+            <template v-for="(hop, i) in nodesStore.tracerouteResult.routeBack" :key="'back-'+i">
+              <span class="text-gray-500">→</span>
+              <span :class="hop === 'unknown' ? 'text-gray-500 italic' : 'text-white'">
+                {{ hop === 'unknown' ? '?' : getNodeName(hop) }}
+              </span>
+            </template>
+            <span class="text-gray-500">→</span>
+            <span class="text-cyan-400">{{ getNodeName(myNodeId) }}</span>
+          </div>
+        </div>
+
+        <div class="text-[10px] text-gray-500">
+          {{ nodesStore.tracerouteResult.route.length === 0 ? 'Direct connection' : (nodesStore.tracerouteResult.route.length + 1) + ' hop' + (nodesStore.tracerouteResult.route.length + 1 > 1 ? 's' : '') }}
+          <span v-if="hopsWithoutPosition.length > 0" class="text-yellow-500 ml-1">
+            ({{ hopsWithoutPosition.length }} node{{ hopsWithoutPosition.length > 1 ? 's' : '' }} not shown on map - no GPS)
+          </span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -35,6 +135,8 @@ const mapContainer = ref(null)
 let map = null
 let markers = {}
 let initialBoundsFit = false // Track if we've done the initial fitBounds
+let traceroutePolyline = null // Track the traceroute visualization
+let tracerouteMarkers = [] // Track markers for hops without GPS
 
 // Get my node's ID
 const myNodeId = computed(() => {
@@ -46,6 +148,18 @@ const myNodeId = computed(() => {
 const myNodeWithPosition = computed(() => {
   if (!myNodeId.value) return null
   return nodesStore.nodesWithPosition.find(n => n.id === myNodeId.value)
+})
+
+// Find hops in traceroute that don't have GPS position
+const hopsWithoutPosition = computed(() => {
+  const result = nodesStore.tracerouteResult
+  if (!result || !result.route) return []
+
+  return result.route.filter(hopId => {
+    if (hopId === 'unknown') return true
+    const node = nodesStore.getNode(hopId)
+    return !node || !node.latitude || !node.longitude
+  })
 })
 
 // Check if a node is my device
@@ -70,6 +184,112 @@ function handlePopupMessageClick(nodeId) {
   router.push('/messages')
 }
 
+// Handle traceroute button click from popup
+function handlePopupTracerouteClick(nodeId) {
+  nodesStore.sendTraceroute(nodeId)
+}
+
+// Get node name for display
+function getNodeName(nodeId) {
+  if (!nodeId) return 'Unknown'
+  const node = nodesStore.getNode(nodeId)
+  if (node) {
+    return node.short_name || node.long_name || nodeId.slice(-4)
+  }
+  return nodeId.slice(-4)
+}
+
+// Clear traceroute visualization
+function clearTraceroute() {
+  nodesStore.clearTraceroute()
+  if (traceroutePolyline && map) {
+    map.removeLayer(traceroutePolyline)
+    traceroutePolyline = null
+  }
+  // Clear any hop markers
+  tracerouteMarkers.forEach(marker => {
+    if (map) map.removeLayer(marker)
+  })
+  tracerouteMarkers = []
+}
+
+// Draw traceroute path on map
+function drawTraceroutePath() {
+  // Remove existing polyline and markers
+  if (traceroutePolyline && map) {
+    map.removeLayer(traceroutePolyline)
+    traceroutePolyline = null
+  }
+  tracerouteMarkers.forEach(marker => {
+    if (map) map.removeLayer(marker)
+  })
+  tracerouteMarkers = []
+
+  const result = nodesStore.tracerouteResult
+  if (!result || !map) return
+
+  // Build array of coordinates for the route
+  const coordinates = []
+  const hopsWithoutGPS = []
+
+  // Start with my node
+  const myNode = myNodeWithPosition.value
+  if (myNode) {
+    coordinates.push([myNode.latitude, myNode.longitude])
+  }
+
+  // Add intermediate hops (track those without GPS)
+  for (const hopId of result.route) {
+    if (hopId === 'unknown') {
+      hopsWithoutGPS.push('?')
+      continue
+    }
+    const hopNode = nodesStore.nodesWithPosition.find(n => n.id === hopId)
+    if (hopNode) {
+      coordinates.push([hopNode.latitude, hopNode.longitude])
+    } else {
+      // Node exists but no GPS - get its name
+      hopsWithoutGPS.push(getNodeName(hopId))
+    }
+  }
+
+  // Add destination (from_node_id is the node that responded, i.e., the destination)
+  const destNode = nodesStore.nodesWithPosition.find(n => n.id === result.from)
+  if (destNode) {
+    coordinates.push([destNode.latitude, destNode.longitude])
+  }
+
+  // Draw polyline if we have at least 2 points
+  if (coordinates.length >= 2) {
+    traceroutePolyline = L.polyline(coordinates, {
+      color: '#f97316', // orange-500
+      weight: 4,
+      opacity: 0.8,
+      dashArray: '10, 10',
+      className: 'traceroute-path'
+    }).addTo(map)
+
+    // If there are hops without GPS, add a label at the midpoint of the line
+    if (hopsWithoutGPS.length > 0 && coordinates.length === 2) {
+      const midLat = (coordinates[0][0] + coordinates[1][0]) / 2
+      const midLng = (coordinates[0][1] + coordinates[1][1]) / 2
+
+      const hopLabel = L.divIcon({
+        className: 'traceroute-hop-label',
+        html: `<div class="hop-label-content">via ${hopsWithoutGPS.join(', ')}</div>`,
+        iconSize: [100, 24],
+        iconAnchor: [50, 12]
+      })
+
+      const marker = L.marker([midLat, midLng], { icon: hopLabel }).addTo(map)
+      tracerouteMarkers.push(marker)
+    }
+
+    // Fit map to show entire route
+    map.fitBounds(traceroutePolyline.getBounds().pad(0.2))
+  }
+}
+
 // Setup popup click handler
 function setupPopupClickHandler() {
   document.addEventListener('click', (e) => {
@@ -78,6 +298,14 @@ function setupPopupClickHandler() {
       const nodeId = messageBtn.dataset.nodeId
       if (nodeId) {
         handlePopupMessageClick(nodeId)
+      }
+    }
+
+    const tracerouteBtn = e.target.closest('.popup-traceroute-btn')
+    if (tracerouteBtn) {
+      const nodeId = tracerouteBtn.dataset.nodeId
+      if (nodeId) {
+        handlePopupTracerouteClick(nodeId)
       }
     }
   })
@@ -99,6 +327,13 @@ onUnmounted(() => {
 })
 
 watch(() => nodesStore.nodesWithPosition, updateMarkers, { deep: true })
+
+// Watch for traceroute results to draw on map
+watch(() => nodesStore.tracerouteResult, (result) => {
+  if (result) {
+    drawTraceroutePath()
+  }
+}, { deep: true })
 
 // Watch for route query changes to focus on a node
 watch(() => route.query, (query) => {
@@ -214,14 +449,20 @@ function createPopupContent(node) {
   const statusText = isMine ? 'Connected' : nodesStore.getStatusText(node)
   const statusColor = isMine ? '#22c55e' : getStatusColor(node)
 
-  // Message button (only for other nodes, not my device)
-  const messageButton = !isMine ? `
+  // Action buttons (only for other nodes, not my device)
+  const actionButtons = !isMine ? `
     <div class="node-popup-actions">
       <button class="popup-message-btn" data-node-id="${node.id}">
         <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
         </svg>
-        Send Message
+        Message
+      </button>
+      <button class="popup-traceroute-btn" data-node-id="${node.id}">
+        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
+        </svg>
+        Traceroute
       </button>
     </div>
   ` : ''
@@ -238,10 +479,10 @@ function createPopupContent(node) {
       <div class="node-popup-id">${node.id}</div>
       ${node.hw_model ? `<div class="node-popup-detail"><span class="label">Model:</span> ${node.hw_model}</div>` : ''}
       ${node.battery_level ? `<div class="node-popup-detail"><span class="label">Battery:</span> ${node.battery_level}%</div>` : ''}
-      ${node.altitude ? `<div class="node-popup-detail"><span class="label">Altitude:</span> ${node.altitude}m</div>` : ''}
+      ${node.altitude ? `<div class="node-popup-detail"><span class="label">Altitude:</span> ${node.altitude}m (${Math.round(node.altitude * 3.28084)}ft)</div>` : ''}
       ${!isMine && node.hops_away !== null && node.hops_away !== undefined ? `<div class="node-popup-detail"><span class="label">Hops:</span> ${node.hops_away === 0 ? 'Direct' : node.hops_away}</div>` : ''}
       ${isMine ? '<div class="node-popup-detail"><span class="label">Status:</span> <span style="color: #22c55e;">Active</span></div>' : (node.last_heard ? `<div class="node-popup-detail"><span class="label">Last heard:</span> ${formatLastHeard(node.last_heard)}</div>` : '')}
-      ${messageButton}
+      ${actionButtons}
     </div>
   `
 }
@@ -463,30 +704,45 @@ function focusOnNode(nodeId, lat, lng) {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid #334155;
+  display: flex;
+  gap: 8px;
 }
 
-.popup-message-btn {
+.popup-message-btn,
+.popup-traceroute-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 12px;
-  background: #3b82f6;
+  gap: 6px;
+  flex: 1;
+  padding: 8px 10px;
   color: white;
   border: none;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   transition: background-color 0.2s;
+}
+
+.popup-message-btn {
+  background: #3b82f6;
 }
 
 .popup-message-btn:hover {
   background: #2563eb;
 }
 
-.popup-message-btn svg {
+.popup-traceroute-btn {
+  background: #f97316;
+}
+
+.popup-traceroute-btn:hover {
+  background: #ea580c;
+}
+
+.popup-message-btn svg,
+.popup-traceroute-btn svg {
   flex-shrink: 0;
 }
 
@@ -499,5 +755,34 @@ function focusOnNode(nodeId, lat, lng) {
 
 .leaflet-popup-close-button:hover {
   color: #f1f5f9 !important;
+}
+
+/* Traceroute path animation */
+.traceroute-path {
+  animation: tracerouteDash 1s linear infinite;
+}
+
+@keyframes tracerouteDash {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+/* Traceroute hop label for nodes without GPS */
+.traceroute-hop-label {
+  background: transparent !important;
+  border: none !important;
+}
+
+.hop-label-content {
+  background: rgba(249, 115, 22, 0.9);
+  color: white;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  border: 2px solid rgba(255, 255, 255, 0.3);
 }
 </style>

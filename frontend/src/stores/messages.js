@@ -83,6 +83,34 @@ export const useMessagesStore = defineStore('messages', () => {
     )
   })
 
+  // Helper to check if a message is a broadcast (not a DM)
+  function isBroadcastMessage(msg, myNodeId) {
+    const toId = msg.to_node_id
+
+    // No destination = broadcast
+    if (!toId) return true
+
+    // Explicit broadcast addresses
+    if (toId === '^all') return true
+    if (toId === '!ffffffff') return true
+    if (toId === '0xffffffff') return true
+    if (toId === 'broadcast') return true
+
+    // If to_node_id equals our own node ID, it's a DM TO us, not a broadcast
+    if (myNodeId && toId === myNodeId) return false
+
+    // If it's an outgoing message with a specific destination, it's a DM
+    if (msg.is_outgoing && toId) return false
+
+    // For incoming messages, if to_node_id is set to something other than broadcast,
+    // it's a DM (either to us or overheard)
+    if (!msg.is_outgoing && toId && toId !== '^all' && toId !== '!ffffffff') {
+      return false
+    }
+
+    return true
+  }
+
   // Get messages for the selected conversation or channel
   const conversationMessages = computed(() => {
     const connectionStore = useConnectionStore()
@@ -91,10 +119,9 @@ export const useMessagesStore = defineStore('messages', () => {
       : null
 
     if (viewMode.value === 'channel') {
-      // Channel mode - show only channel messages (to_node_id is null or '^all')
-      // Filter by selected channel
+      // Channel mode - show only broadcast messages, filter by channel
       return messages.value.filter(m =>
-        (!m.to_node_id || m.to_node_id === '^all') && m.channel === selectedChannel.value
+        isBroadcastMessage(m, myNodeId) && m.channel === selectedChannel.value
       )
     }
 
