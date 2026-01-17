@@ -21,6 +21,11 @@ class MeshtasticClient:
         self._event_callbacks: List[Callable] = []
         self._lock = asyncio.Lock()
         self._main_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._intentional_disconnect = False  # Track if user requested disconnect
+        self._reconnect_task: Optional[asyncio.Task] = None
+        self._reconnect_attempts = 0
+        self._max_reconnect_attempts = 5
+        self._reconnect_delay = 5  # seconds
 
     @property
     def connected(self) -> bool:
@@ -205,9 +210,116 @@ class MeshtasticClient:
 
     def _on_disconnect(self, interface, topic=pub.AUTO_TOPIC):
         """Handle disconnection events."""
-        logger.info("Disconnected from Meshtastic device")
+        was_connected = self._connected
         self._connected = False
-        self._schedule_event("connection", {"connected": False})
+
+        if self._intentional_disconnect:
+            logger.info("[CONN] Disconnected from Meshtastic device (user requested)")
+            self._schedule_event("connection", {"connected": False})
+        else:
+            logger.warning("[CONN] Unexpected disconnection from Meshtastic device")
+            self._schedule_event("connection", {"connected": False, "unexpected": True})
+
+            # Trigger auto-reconnect if we were previously connected
+            if was_connected and self._main_loop:
+                logger.info("[CONN] Scheduling auto-reconnect...")
+                self._main_loop.call_soon_threadsafe(
+                    lambda: asyncio.create_task(self._auto_reconnect())
+                )
+
+    async def _auto_reconnect(self):
+        """Attempt to automatically reconnect after unexpected disconnection."""
+        if self._intentional_disconnect:
+            logger.info("[CONN] Skipping auto-reconnect (intentional disconnect)")
+            return
+
+        # Cancel any existing reconnect task
+        if self._reconnect_task and not self._reconnect_task.done():
+            return  # Already reconnecting
+
+        self._reconnect_attempts = 0
+
+        while self._reconnect_attempts < self._max_reconnect_attempts:
+            if self._intentional_disconnect or self._connected:
+                logger.info("[CONN] Auto-reconnect cancelled")
+                return
+
+            self._reconnect_attempts += 1
+            delay = self._reconnect_delay * self._reconnect_attempts  # Exponential backoff
+
+            logger.info(f"[CONN] Auto-reconnect attempt {self._reconnect_attempts}/{self._max_reconnect_attempts} in {delay}s...")
+            self._schedule_event("connection", {
+                "connected": False,
+                "reconnecting": True,
+                "attempt": self._reconnect_attempts,
+                "max_attempts": self._max_reconnect_attempts
+            })
+
+            await asyncio.sleep(delay)
+
+            if self._intentional_disconnect or self._connected:
+                return
+
+            try:
+                success = await self._connect_internal()
+                if success:
+                    logger.info("[CONN] Auto-reconnect successful!")
+                    self._reconnect_attempts = 0
+                    return
+            except Exception as e:
+                logger.error(f"[CONN] Auto-reconnect attempt {self._reconnect_attempts} failed: {e}")
+
+        logger.error(f"[CONN] Auto-reconnect failed after {self._max_reconnect_attempts} attempts")
+        self._schedule_event("connection", {
+            "connected": False,
+            "reconnect_failed": True
+        })
+
+    async def _connect_internal(self) -> bool:
+        """Internal connect logic without lock (for reconnect use)."""
+        try:
+            # Clean up old subscriptions first
+            try:
+                pub.unsubscribe(self._on_receive, "meshtastic.receive")
+                pub.unsubscribe(self._on_connection, "meshtastic.connection.established")
+                pub.unsubscribe(self._on_disconnect, "meshtastic.connection.lost")
+            except Exception:
+                pass
+
+            # Store the main event loop for thread-safe callbacks
+            self._main_loop = asyncio.get_event_loop()
+
+            logger.info(f"[CONN] Connecting to {self.settings.meshtastic_device_name}...")
+
+            # Subscribe to events
+            pub.subscribe(self._on_receive, "meshtastic.receive")
+            pub.subscribe(self._on_connection, "meshtastic.connection.established")
+            pub.subscribe(self._on_disconnect, "meshtastic.connection.lost")
+
+            # Connect via BLE (runs in thread pool)
+            loop = asyncio.get_event_loop()
+            self.interface = await loop.run_in_executor(
+                None,
+                lambda: BLEInterface(self.settings.meshtastic_device_name)
+            )
+
+            self._my_info = self.interface.myInfo
+            self._metadata = self.interface.metadata
+            self._nodes = self.interface.nodes
+            self._connected = True
+            self._intentional_disconnect = False  # Reset on successful connect
+
+            logger.info(f"[CONN] Connected! My node num: {self.my_node_num}")
+
+            # Broadcast connection status now that everything is ready
+            self._schedule_event("connection", self.get_connection_status())
+
+            return True
+
+        except Exception as e:
+            logger.error(f"[CONN] Failed to connect: {e}")
+            self._connected = False
+            return False
 
     async def connect(self) -> bool:
         """Connect to the Meshtastic device via BLE."""
@@ -215,47 +327,20 @@ class MeshtasticClient:
             if self.connected:
                 return True
 
-            try:
-                # Store the main event loop for thread-safe callbacks
-                self._main_loop = asyncio.get_event_loop()
-
-                logger.info(f"Connecting to {self.settings.meshtastic_device_name}...")
-
-                # Subscribe to events
-                pub.subscribe(self._on_receive, "meshtastic.receive")
-                pub.subscribe(self._on_connection, "meshtastic.connection.established")
-                pub.subscribe(self._on_disconnect, "meshtastic.connection.lost")
-
-                # Connect via BLE (runs in thread pool)
-                loop = asyncio.get_event_loop()
-                self.interface = await loop.run_in_executor(
-                    None,
-                    lambda: BLEInterface(self.settings.meshtastic_device_name)
-                )
-
-                self._my_info = self.interface.myInfo
-                self._metadata = self.interface.metadata
-                self._nodes = self.interface.nodes
-                self._connected = True
-
-                logger.info(f"Connected! My node num: {self.my_node_num}")
-
-                # Broadcast connection status now that everything is ready
-                self._schedule_event("connection", self.get_connection_status())
-
-                return True
-
-            except Exception as e:
-                logger.error(f"Failed to connect: {e}")
-                self._connected = False
-                return False
+            # User is requesting connection, so clear intentional disconnect flag
+            self._intentional_disconnect = False
+            return await self._connect_internal()
 
     async def disconnect(self):
         """Disconnect from the Meshtastic device."""
-        logger.info("Disconnect called")
+        logger.info("[CONN] User-requested disconnect")
+
+        # Set flag BEFORE disconnecting to prevent auto-reconnect
+        self._intentional_disconnect = True
+
         async with self._lock:
             if not self.interface:
-                logger.info("No active interface to disconnect")
+                logger.info("[CONN] No active interface to disconnect")
                 self._connected = False
                 return
 

@@ -43,6 +43,28 @@
       </div>
     </div>
 
+    <!-- Auto-reconnecting progress -->
+    <div v-if="connectionStore.reconnecting" class="space-y-2">
+      <div class="flex items-center gap-2 text-xs text-orange-400">
+        <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        <span>Reconnecting ({{ connectionStore.reconnectAttempt }}/{{ connectionStore.reconnectMaxAttempts }})...</span>
+      </div>
+      <div class="w-full h-1 bg-gray-700 rounded-full overflow-hidden">
+        <div
+          class="h-full bg-orange-500 transition-all duration-500"
+          :style="{ width: `${(connectionStore.reconnectAttempt / connectionStore.reconnectMaxAttempts) * 100}%` }"
+        ></div>
+      </div>
+    </div>
+
+    <!-- Reconnect failed -->
+    <div v-if="connectionStore.reconnectFailed" class="text-xs text-red-400">
+      Auto-reconnect failed. Click Connect to retry.
+    </div>
+
     <div v-if="connectionStore.connected" class="text-xs text-gray-400 space-y-1">
       <p>{{ connectionStore.deviceName }}</p>
       <p v-if="connectionStore.firmwareVersion">FW: {{ connectionStore.firmwareVersion }}</p>
@@ -98,25 +120,35 @@ let progressInterval = null
 const statusDotClass = computed(() => {
   if (connecting.value) return 'bg-yellow-500 animate-pulse'
   if (disconnecting.value) return 'bg-orange-500 animate-pulse'
+  if (connectionStore.reconnecting) return 'bg-orange-500 animate-pulse'
   if (connectionStore.connected) return 'bg-green-500 animate-pulse'
+  if (connectionStore.reconnectFailed) return 'bg-red-500'
   return 'bg-red-500'
 })
 
 const statusText = computed(() => {
   if (connecting.value) return 'Connecting...'
   if (disconnecting.value) return 'Disconnecting...'
+  if (connectionStore.reconnecting) return `Reconnecting (${connectionStore.reconnectAttempt}/${connectionStore.reconnectMaxAttempts})...`
   if (connectionStore.connected) return 'Connected'
+  if (connectionStore.reconnectFailed) return 'Reconnect Failed'
   return 'Disconnected'
 })
 
 const statusTooltip = computed(() => {
   if (connecting.value) return 'Connecting... Click to cancel'
   if (disconnecting.value) return 'Disconnecting...'
+  if (connectionStore.reconnecting) {
+    return `Auto-reconnecting (attempt ${connectionStore.reconnectAttempt}/${connectionStore.reconnectMaxAttempts})...`
+  }
   if (connectionStore.connected) {
     let tooltip = `Connected: ${connectionStore.deviceName || 'Device'}`
     if (connectionStore.hwModel) tooltip += ` (${connectionStore.hwModel})`
     tooltip += '\nClick to disconnect'
     return tooltip
+  }
+  if (connectionStore.reconnectFailed) {
+    return 'Auto-reconnect failed - Click to connect manually'
   }
   return 'Disconnected - Click to connect'
 })

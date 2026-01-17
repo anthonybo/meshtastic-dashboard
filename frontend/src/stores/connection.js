@@ -12,6 +12,10 @@ export const useConnectionStore = defineStore('connection', () => {
   const hwModel = ref(null)
   const ws = ref(null)
   const wsConnected = ref(false)
+  const reconnecting = ref(false)
+  const reconnectAttempt = ref(0)
+  const reconnectMaxAttempts = ref(0)
+  const reconnectFailed = ref(false)
 
   const status = computed(() => ({
     connected: connected.value,
@@ -130,13 +134,33 @@ export const useConnectionStore = defineStore('connection', () => {
       case 'connection':
         const wasConnected = connected.value
         console.log('Connection status received:', message.data)
-        console.log('Was connected:', wasConnected, 'Now connected:', message.data.connected)
         updateStatus(message.data)
 
+        // Handle reconnecting state
+        if (message.data.reconnecting) {
+          reconnecting.value = true
+          reconnectAttempt.value = message.data.attempt || 0
+          reconnectMaxAttempts.value = message.data.max_attempts || 5
+          reconnectFailed.value = false
+          console.log(`Reconnecting: attempt ${reconnectAttempt.value}/${reconnectMaxAttempts.value}`)
+        } else if (message.data.reconnect_failed) {
+          reconnecting.value = false
+          reconnectFailed.value = true
+          console.log('Reconnect failed after max attempts')
+        } else {
+          reconnecting.value = false
+          reconnectFailed.value = false
+          reconnectAttempt.value = 0
+        }
+
         if (message.data.connected) {
+          // Clear reconnect state on successful connection
+          reconnecting.value = false
+          reconnectFailed.value = false
+          reconnectAttempt.value = 0
+
           // Always ensure polling is running when connected
-          // startPolling() is idempotent - it won't start twice
-          nodesStore.startPolling(10000) // Poll every 10 seconds for near real-time updates
+          nodesStore.startPolling(10000)
 
           // If we just learned we're connected, fetch initial data
           if (!wasConnected) {
@@ -150,8 +174,8 @@ export const useConnectionStore = defineStore('connection', () => {
               console.error('Error fetching data on reconnect:', err)
             }
           }
-        } else {
-          // Stop polling if we disconnected
+        } else if (!message.data.reconnecting) {
+          // Stop polling if we disconnected (but not if we're reconnecting)
           nodesStore.stopPolling()
         }
         break
@@ -214,6 +238,10 @@ export const useConnectionStore = defineStore('connection', () => {
     firmwareVersion,
     hwModel,
     wsConnected,
+    reconnecting,
+    reconnectAttempt,
+    reconnectMaxAttempts,
+    reconnectFailed,
     status,
     fetchStatus,
     connect,
