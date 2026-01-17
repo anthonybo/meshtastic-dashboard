@@ -26,3 +26,6 @@ logs/
 
 # Database
 *.db
+
+# Internal tracking
+TODO.md
