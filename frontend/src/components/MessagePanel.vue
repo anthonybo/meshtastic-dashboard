@@ -467,16 +467,31 @@ const inputPlaceholder = computed(() => {
   return `Broadcast to ${chatTitle.value}...`
 })
 
-onMounted(() => {
-  messagesStore.fetchMessages()
-})
-
-watch(() => messagesStore.conversationMessages.length, () => {
+function scrollToBottom() {
   nextTick(() => {
     if (messagesContainer.value) {
       messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
     }
   })
+}
+
+onMounted(async () => {
+  await messagesStore.fetchMessages()
+  scrollToBottom()
+})
+
+// Scroll when new messages arrive
+watch(() => messagesStore.conversationMessages.length, () => {
+  scrollToBottom()
+})
+
+// Scroll when switching conversations or channels
+watch(() => messagesStore.selectedConversation, () => {
+  scrollToBottom()
+})
+
+watch(() => messagesStore.selectedChannel, () => {
+  scrollToBottom()
 })
 
 async function sendMessage() {

@@ -536,6 +536,11 @@ function focusOnNode(nodeId, lat, lng) {
     markers[nodeId].openPopup()
   }
 }
+
+// Expose methods for parent components
+defineExpose({
+  focusOnNode
+})
 </script>
 
 <style>
