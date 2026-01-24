@@ -23,7 +23,9 @@ async def connect_device():
     success = await meshtastic_client.connect()
 
     if not success:
-        raise HTTPException(status_code=503, detail="Failed to connect to device")
+        error_detail = meshtastic_client.last_error or "Failed to connect to device"
+        logger.error(f"Connection failed: {error_detail}")
+        raise HTTPException(status_code=503, detail=error_detail)
 
     return {"status": "connected", **meshtastic_client.get_connection_status()}
 

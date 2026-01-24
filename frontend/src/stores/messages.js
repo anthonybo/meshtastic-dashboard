@@ -184,7 +184,28 @@ export const useMessagesStore = defineStore('messages', () => {
     if (!message.timestamp) {
       message.timestamp = new Date().toISOString()
     }
-    messages.value.unshift(message)
+
+    // Check for duplicates by ID or by content+timestamp+sender
+    const isDuplicate = messages.value.some(m => {
+      // If both have IDs, compare by ID
+      if (m.id && message.id) {
+        return m.id === message.id
+      }
+      // Otherwise compare by content, sender, and approximate timestamp
+      if (m.text === message.text &&
+          m.from_node_id === message.from_node_id &&
+          m.to_node_id === message.to_node_id) {
+        // Check if timestamps are within 5 seconds of each other
+        const t1 = new Date(m.timestamp).getTime()
+        const t2 = new Date(message.timestamp).getTime()
+        return Math.abs(t1 - t2) < 5000
+      }
+      return false
+    })
+
+    if (!isDuplicate) {
+      messages.value.unshift(message)
+    }
   }
 
   function setSelectedChannel(channel) {

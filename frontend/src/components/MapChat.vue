@@ -214,7 +214,8 @@ function scrollToBottom() {
   })
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await messagesStore.fetchMessages()
   scrollToBottom()
   document.addEventListener('click', handleClickOutside)
 })

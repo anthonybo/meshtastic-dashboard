@@ -26,6 +26,7 @@ class MeshtasticClient:
         self._reconnect_attempts = 0
         self._max_reconnect_attempts = 5
         self._reconnect_delay = 5  # seconds
+        self._last_error: Optional[str] = None  # Store last connection error
 
     @property
     def connected(self) -> bool:
@@ -317,9 +318,15 @@ class MeshtasticClient:
             return True
 
         except Exception as e:
-            logger.error(f"[CONN] Failed to connect: {e}")
+            error_msg = str(e)
+            logger.error(f"[CONN] Failed to connect: {error_msg}")
             self._connected = False
+            self._last_error = error_msg
             return False
+
+    @property
+    def last_error(self) -> Optional[str]:
+        return self._last_error
 
     async def connect(self) -> bool:
         """Connect to the Meshtastic device via BLE."""

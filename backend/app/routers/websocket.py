@@ -41,15 +41,35 @@ async def handle_meshtastic_event(event_type: str, data: dict):
     # Broadcast to connected clients
     await broadcast({"type": event_type, "data": data})
 
-    # Store incoming messages in database
+    # Store incoming messages in database (with deduplication)
     if event_type == "message":
         async with async_session() as db:
             try:
+                from_node = data.get("from_node_id")
+                to_node = data.get("to_node_id")
+                channel = data.get("channel", 0)
+                text = data.get("text", "")
+
+                # Check for duplicate message (same sender, recipient, text within last 30 seconds)
+                from datetime import datetime, timedelta
+                cutoff = datetime.utcnow() - timedelta(seconds=30)
+                existing = await db.execute(
+                    select(Message).where(and_(
+                        Message.from_node_id == from_node,
+                        Message.to_node_id == to_node,
+                        Message.text == text,
+                        Message.timestamp > cutoff
+                    )).limit(1)
+                )
+                if existing.scalar_one_or_none():
+                    logger.debug(f"Skipping duplicate message from {from_node}")
+                    return
+
                 msg = Message(
-                    from_node_id=data.get("from_node_id"),
-                    to_node_id=data.get("to_node_id"),
-                    channel=data.get("channel", 0),
-                    text=data.get("text", ""),
+                    from_node_id=from_node,
+                    to_node_id=to_node,
+                    channel=channel,
+                    text=text,
                     is_outgoing=False
                 )
                 db.add(msg)

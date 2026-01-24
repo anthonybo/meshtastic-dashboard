@@ -16,6 +16,9 @@ export const useConnectionStore = defineStore('connection', () => {
   const reconnectAttempt = ref(0)
   const reconnectMaxAttempts = ref(0)
   const reconnectFailed = ref(false)
+  const connectionError = ref(null)
+  const lastDataReceived = ref(null)
+  const dataStaleThreshold = 120000 // 2 minutes without data = stale
 
   const status = computed(() => ({
     connected: connected.value,
@@ -24,6 +27,11 @@ export const useConnectionStore = defineStore('connection', () => {
     firmwareVersion: firmwareVersion.value,
     hwModel: hwModel.value
   }))
+
+  const isDataStale = computed(() => {
+    if (!connected.value || !lastDataReceived.value) return false
+    return Date.now() - lastDataReceived.value > dataStaleThreshold
+  })
 
   async function fetchStatus() {
     try {
@@ -54,6 +62,8 @@ export const useConnectionStore = defineStore('connection', () => {
 
   async function connect() {
     try {
+      connectionError.value = null
+      lastDataReceived.value = Date.now()
       const response = await axios.post('/api/connection/connect')
       updateStatus(response.data)
 
@@ -70,6 +80,9 @@ export const useConnectionStore = defineStore('connection', () => {
       return true
     } catch (error) {
       console.error('Failed to connect:', error)
+      // Extract error message from response
+      const errorMsg = error.response?.data?.detail || error.message || 'Connection failed'
+      connectionError.value = errorMsg
       return false
     }
   }
@@ -129,6 +142,11 @@ export const useConnectionStore = defineStore('connection', () => {
   async function handleWebSocketMessage(message) {
     const nodesStore = useNodesStore()
     const messagesStore = useMessagesStore()
+
+    // Update lastDataReceived for meaningful data events
+    if (['message', 'node_update', 'telemetry', 'position'].includes(message.type)) {
+      lastDataReceived.value = Date.now()
+    }
 
     switch (message.type) {
       case 'connection':
@@ -242,6 +260,9 @@ export const useConnectionStore = defineStore('connection', () => {
     reconnectAttempt,
     reconnectMaxAttempts,
     reconnectFailed,
+    connectionError,
+    lastDataReceived,
+    isDataStale,
     status,
     fetchStatus,
     connect,
