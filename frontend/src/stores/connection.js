@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import axios from 'axios'
 import { useNodesStore } from './nodes'
 import { useMessagesStore } from './messages'
+import { useConsoleStore } from './console'
 
 export const useConnectionStore = defineStore('connection', () => {
   const connected = ref(false)
@@ -17,8 +18,11 @@ export const useConnectionStore = defineStore('connection', () => {
   const reconnectMaxAttempts = ref(0)
   const reconnectFailed = ref(false)
   const connectionError = ref(null)
+  const disconnectWarning = ref(null)
   const lastDataReceived = ref(null)
   const dataStaleThreshold = 120000 // 2 minutes without data = stale
+  const lastScanResult = ref(null)  // Store BLE scan results
+  const scanning = ref(false)
 
   const status = computed(() => ({
     connected: connected.value,
@@ -63,6 +67,8 @@ export const useConnectionStore = defineStore('connection', () => {
   async function connect() {
     try {
       connectionError.value = null
+      disconnectWarning.value = null  // Clear any previous warning
+      lastScanResult.value = null
       lastDataReceived.value = Date.now()
       const response = await axios.post('/api/connection/connect')
       updateStatus(response.data)
@@ -80,9 +86,16 @@ export const useConnectionStore = defineStore('connection', () => {
       return true
     } catch (error) {
       console.error('Failed to connect:', error)
-      // Extract error message from response
-      const errorMsg = error.response?.data?.detail || error.message || 'Connection failed'
-      connectionError.value = errorMsg
+      // Extract error message and scan results from response
+      const errorData = error.response?.data?.detail
+      if (typeof errorData === 'object') {
+        connectionError.value = errorData.detail || 'Connection failed'
+        if (errorData.scan_result) {
+          lastScanResult.value = errorData.scan_result
+        }
+      } else {
+        connectionError.value = errorData || error.message || 'Connection failed'
+      }
       return false
     }
   }
@@ -95,15 +108,67 @@ export const useConnectionStore = defineStore('connection', () => {
       const nodesStore = useNodesStore()
       nodesStore.stopPolling()
 
-      await axios.post('/api/connection/disconnect')
+      const response = await axios.post('/api/connection/disconnect')
       console.log('Disconnect successful')
       connected.value = false
       deviceName.value = null
       myNodeNum.value = null
       firmwareVersion.value = null
       hwModel.value = null
+
+      // Check for warning about BLE close timeout
+      if (response.data.warning) {
+        disconnectWarning.value = response.data.warning
+        console.warn('Disconnect warning:', response.data.warning)
+      } else {
+        disconnectWarning.value = null
+      }
     } catch (error) {
       console.error('Failed to disconnect:', error)
+    }
+  }
+
+  async function resetBle() {
+    try {
+      console.log('BLE reset initiated...')
+      connectionError.value = null
+      disconnectWarning.value = null
+
+      const response = await axios.post('/api/connection/reset')
+      console.log('BLE reset result:', response.data)
+
+      if (response.data.success) {
+        connectionError.value = null
+        disconnectWarning.value = null
+        return { success: true, message: response.data.message }
+      } else {
+        connectionError.value = response.data.message
+        return { success: false, message: response.data.message }
+      }
+    } catch (error) {
+      console.error('Failed to reset BLE:', error)
+      const errorMsg = error.response?.data?.detail || error.message || 'Reset failed'
+      connectionError.value = errorMsg
+      return { success: false, message: errorMsg }
+    }
+  }
+
+  async function scanBleDevices() {
+    try {
+      scanning.value = true
+      console.log('Scanning for BLE devices...')
+
+      const response = await axios.get('/api/connection/scan')
+      console.log('Scan result:', response.data)
+      lastScanResult.value = response.data
+
+      return response.data
+    } catch (error) {
+      console.error('Failed to scan for BLE devices:', error)
+      const errorMsg = error.response?.data?.detail || error.message || 'Scan failed'
+      return { error: errorMsg }
+    } finally {
+      scanning.value = false
     }
   }
 
@@ -142,6 +207,10 @@ export const useConnectionStore = defineStore('connection', () => {
   async function handleWebSocketMessage(message) {
     const nodesStore = useNodesStore()
     const messagesStore = useMessagesStore()
+    const consoleStore = useConsoleStore()
+
+    // Log all incoming WebSocket messages to the console
+    consoleStore.addLog(message.type, message.data, 'in')
 
     // Update lastDataReceived for meaningful data events
     if (['message', 'node_update', 'telemetry', 'position'].includes(message.type)) {
@@ -238,6 +307,8 @@ export const useConnectionStore = defineStore('connection', () => {
 
   function sendWebSocketMessage(type, data = {}) {
     if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+      const consoleStore = useConsoleStore()
+      consoleStore.addLog(type, data, 'out')
       ws.value.send(JSON.stringify({ type, ...data }))
     }
   }
@@ -261,12 +332,17 @@ export const useConnectionStore = defineStore('connection', () => {
     reconnectMaxAttempts,
     reconnectFailed,
     connectionError,
+    disconnectWarning,
     lastDataReceived,
     isDataStale,
+    lastScanResult,
+    scanning,
     status,
     fetchStatus,
     connect,
     disconnect,
+    resetBle,
+    scanBleDevices,
     initWebSocket,
     sendWebSocketMessage,
     closeWebSocket

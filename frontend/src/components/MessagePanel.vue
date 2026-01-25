@@ -468,30 +468,44 @@ const inputPlaceholder = computed(() => {
 })
 
 function scrollToBottom() {
-  nextTick(() => {
-    if (messagesContainer.value) {
-      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
-    }
-  })
+  if (messagesContainer.value) {
+    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+  }
 }
 
 onMounted(async () => {
   await messagesStore.fetchMessages()
-  scrollToBottom()
 })
 
-// Scroll when new messages arrive
-watch(() => messagesStore.conversationMessages.length, () => {
-  scrollToBottom()
-})
+// Watch for messages changes and scroll to bottom
+// Using flush: 'post' ensures it runs after DOM updates
+watch(
+  () => displayMessages.value,
+  () => {
+    nextTick(() => {
+      scrollToBottom()
+      // Multiple backup scrolls to ensure it works on initial load
+      setTimeout(scrollToBottom, 50)
+      setTimeout(scrollToBottom, 150)
+      setTimeout(scrollToBottom, 300)
+    })
+  },
+  { immediate: true, flush: 'post' }
+)
 
 // Scroll when switching conversations or channels
 watch(() => messagesStore.selectedConversation, () => {
-  scrollToBottom()
+  nextTick(() => {
+    scrollToBottom()
+    setTimeout(scrollToBottom, 100)
+  })
 })
 
 watch(() => messagesStore.selectedChannel, () => {
-  scrollToBottom()
+  nextTick(() => {
+    scrollToBottom()
+    setTimeout(scrollToBottom, 100)
+  })
 })
 
 async function sendMessage() {

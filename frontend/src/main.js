@@ -9,12 +9,14 @@ import Dashboard from './views/Dashboard.vue'
 import Messages from './views/Messages.vue'
 import MapView from './views/MapView.vue'
 import NodesView from './views/NodesView.vue'
+import Console from './views/Console.vue'
 
 const routes = [
   { path: '/', component: Dashboard },
   { path: '/nodes', component: NodesView },
   { path: '/messages', component: Messages },
-  { path: '/map', component: MapView }
+  { path: '/map', component: MapView },
+  { path: '/console', component: Console }
 ]
 
 const router = createRouter({

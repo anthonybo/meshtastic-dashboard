@@ -82,6 +82,19 @@
           </svg>
           <span v-if="!sidebarCollapsed" class="whitespace-nowrap">Map</span>
         </router-link>
+
+        <router-link
+          to="/console"
+          class="nav-link flex items-center gap-3 py-3 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+          :class="sidebarCollapsed ? 'px-0 justify-center' : 'px-4'"
+          active-class="bg-gray-700 text-white border-l-4 border-mesh-500"
+          :title="sidebarCollapsed ? 'Console' : ''"
+        >
+          <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+          </svg>
+          <span v-if="!sidebarCollapsed" class="whitespace-nowrap">Console</span>
+        </router-link>
       </nav>
 
       <!-- Connection Status -->

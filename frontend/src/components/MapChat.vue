@@ -207,17 +207,14 @@ const messages = computed(() => {
 })
 
 function scrollToBottom() {
-  nextTick(() => {
-    if (messagesContainer.value) {
-      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
-    }
-  })
+  if (messagesContainer.value) {
+    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+  }
 }
 
 onMounted(async () => {
-  await messagesStore.fetchMessages()
-  scrollToBottom()
   document.addEventListener('click', handleClickOutside)
+  await messagesStore.fetchMessages()
 })
 
 onUnmounted(() => {
@@ -230,9 +227,20 @@ function handleClickOutside(e) {
   }
 }
 
-watch(() => messages.value.length, () => {
-  scrollToBottom()
-})
+// Watch for messages changes and scroll to bottom
+// Using flush: 'post' ensures it runs after DOM updates
+watch(
+  () => messages.value,
+  () => {
+    nextTick(() => {
+      scrollToBottom()
+      // Backup scroll after delay for initial load
+      setTimeout(scrollToBottom, 50)
+      setTimeout(scrollToBottom, 200)
+    })
+  },
+  { immediate: true, flush: 'post', deep: true }
+)
 
 async function sendMessage() {
   if (!messageText.value.trim()) return

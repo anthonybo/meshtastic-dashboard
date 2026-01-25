@@ -122,6 +122,11 @@
       </div>
     </div>
 
+    <!-- Live Console -->
+    <div class="h-[300px]">
+      <ConsolePanel />
+    </div>
+
     <!-- Recent Nodes -->
     <div>
       <div class="flex items-center justify-between mb-4">
@@ -149,6 +154,7 @@ import { useMessagesStore } from '../stores/messages'
 import MessagePanel from '../components/MessagePanel.vue'
 import TelemetryChart from '../components/TelemetryChart.vue'
 import NodeCard from '../components/NodeCard.vue'
+import ConsolePanel from '../components/ConsolePanel.vue'
 
 const connectionStore = useConnectionStore()
 const nodesStore = useNodesStore()

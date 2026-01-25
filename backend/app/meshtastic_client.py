@@ -27,6 +27,9 @@ class MeshtasticClient:
         self._max_reconnect_attempts = 5
         self._reconnect_delay = 5  # seconds
         self._last_error: Optional[str] = None  # Store last connection error
+        self._close_failed = False  # Track if last close had issues
+        self._device_address: Optional[str] = None  # Store BLE address for cleanup
+        self._last_scan_result: Optional[dict] = None  # Store last BLE scan results
 
     @property
     def connected(self) -> bool:
@@ -42,6 +45,195 @@ class MeshtasticClient:
     @property
     def nodes(self) -> dict:
         return self._nodes
+
+    async def _force_ble_cleanup(self, address: Optional[str] = None) -> bool:
+        """Force cleanup of BLE connection using bleak directly.
+
+        This is used when the normal close() times out and we need to
+        forcibly release the BLE connection.
+        """
+        from bleak import BleakClient, BleakScanner
+
+        target_address = address or self._device_address
+        if not target_address:
+            logger.info("[BLE] No device address stored for cleanup")
+            return False
+
+        logger.info(f"[BLE] Attempting force cleanup for {target_address}")
+
+        try:
+            # Try to connect and immediately disconnect to reset the connection state
+            client = BleakClient(target_address)
+            try:
+                # Check if we can connect (with short timeout)
+                connected = await asyncio.wait_for(client.connect(), timeout=5.0)
+                if connected:
+                    logger.info("[BLE] Connected to orphaned device, disconnecting...")
+                    await client.disconnect()
+                    logger.info("[BLE] Force disconnect successful")
+                    return True
+            except asyncio.TimeoutError:
+                logger.warning("[BLE] Force connect timed out")
+            except Exception as e:
+                logger.debug(f"[BLE] Force connect failed (expected if device gone): {e}")
+            finally:
+                try:
+                    if client.is_connected:
+                        await client.disconnect()
+                except Exception:
+                    pass
+            return False
+        except Exception as e:
+            logger.error(f"[BLE] Force cleanup error: {e}")
+            return False
+
+    async def _scan_for_device(self) -> Optional[str]:
+        """Scan for the Meshtastic device and return its address."""
+        device_name = self.settings.meshtastic_device_name
+        logger.info(f"[BLE] Scanning for device: {device_name}")
+
+        try:
+            scan_result = await self.scan_ble_devices()
+
+            # Look for our configured device
+            for device in scan_result.get("meshtastic_devices", []):
+                if device["name"] == device_name:
+                    logger.info(f"[BLE] Found device at address: {device['address']}")
+                    return device["address"]
+
+            # Not found - log what we did find
+            meshtastic_count = len(scan_result.get("meshtastic_devices", []))
+            other_count = len(scan_result.get("other_devices", []))
+            logger.warning(f"[BLE] Device '{device_name}' not found. "
+                          f"Found {meshtastic_count} Meshtastic device(s), {other_count} other device(s)")
+            return None
+        except Exception as e:
+            logger.error(f"[BLE] Scan error: {e}")
+            return None
+
+    async def scan_ble_devices(self, timeout: float = 10.0) -> dict:
+        """Scan for all BLE devices and categorize them.
+
+        Returns a dict with:
+        - meshtastic_devices: List of Meshtastic devices found
+        - other_devices: List of other named BLE devices
+        - configured_device: The device name from config
+        - configured_device_found: Whether the configured device was found
+        """
+        from bleak import BleakScanner
+
+        logger.info(f"[BLE] Starting BLE scan (timeout={timeout}s)...")
+
+        result = {
+            "meshtastic_devices": [],
+            "other_devices": [],
+            "configured_device": self.settings.meshtastic_device_name,
+            "configured_device_found": False,
+            "scan_duration": timeout
+        }
+
+        try:
+            devices = await asyncio.wait_for(
+                BleakScanner.discover(timeout=timeout),
+                timeout=timeout + 2  # Extra buffer for the discover call
+            )
+
+            for device in devices:
+                if not device.name:
+                    continue  # Skip unnamed devices
+
+                device_info = {
+                    "name": device.name,
+                    "address": device.address,
+                    "rssi": device.rssi if hasattr(device, 'rssi') else None
+                }
+
+                if "Meshtastic" in device.name:
+                    result["meshtastic_devices"].append(device_info)
+                    if device.name == self.settings.meshtastic_device_name:
+                        result["configured_device_found"] = True
+                else:
+                    result["other_devices"].append(device_info)
+
+            # Sort Meshtastic devices by name, others by RSSI (strongest first)
+            result["meshtastic_devices"].sort(key=lambda d: d["name"])
+            result["other_devices"].sort(key=lambda d: d.get("rssi") or -999, reverse=True)
+
+            # Limit other devices to top 10 by signal strength
+            result["other_devices"] = result["other_devices"][:10]
+
+            logger.info(f"[BLE] Scan complete: {len(result['meshtastic_devices'])} Meshtastic, "
+                       f"{len(result['other_devices'])} other devices")
+
+        except asyncio.TimeoutError:
+            logger.warning("[BLE] Scan timed out")
+            result["error"] = "Scan timed out"
+        except Exception as e:
+            logger.error(f"[BLE] Scan error: {e}")
+            result["error"] = str(e)
+
+        return result
+
+    async def reset_ble(self) -> dict:
+        """Reset BLE connection state. Use when connection is stuck."""
+        logger.info("[BLE] Starting BLE reset...")
+
+        result = {
+            "success": False,
+            "message": "",
+            "device_found": False
+        }
+
+        # First, ensure we're marked as disconnected
+        self._intentional_disconnect = True
+        self._connected = False
+
+        # Unsubscribe from events
+        try:
+            pub.unsubscribe(self._on_receive, "meshtastic.receive")
+            pub.unsubscribe(self._on_connection, "meshtastic.connection.established")
+            pub.unsubscribe(self._on_disconnect, "meshtastic.connection.lost")
+        except Exception:
+            pass
+
+        # Try to close interface if we have one
+        if self.interface:
+            try:
+                # Get the bleak client address before closing
+                if hasattr(self.interface, 'bleak_client') and self.interface.bleak_client:
+                    self._device_address = self.interface.bleak_client.address
+                    logger.info(f"[BLE] Stored device address: {self._device_address}")
+            except Exception:
+                pass
+
+            self.interface = None
+            self._my_info = None
+            self._metadata = None
+            self._nodes = {}
+
+        # Try force cleanup if we have an address
+        if self._device_address:
+            cleanup_success = await self._force_ble_cleanup()
+            if cleanup_success:
+                result["message"] = "Force cleanup successful"
+
+        # Scan to see if device is now visible
+        await asyncio.sleep(2)  # Give BLE time to settle
+        found_address = await self._scan_for_device()
+
+        if found_address:
+            result["success"] = True
+            result["device_found"] = True
+            result["message"] = f"Device found at {found_address}"
+            self._device_address = found_address
+            self._close_failed = False
+        else:
+            result["message"] = "Device not found after reset. BLE may still be held by system. Try restarting the server."
+            self._close_failed = True
+
+        self._schedule_event("connection", {"connected": False, "reset": True})
+
+        return result
 
     def add_event_callback(self, callback: Callable):
         self._event_callbacks.append(callback)
@@ -304,11 +496,20 @@ class MeshtasticClient:
                 lambda: BLEInterface(self.settings.meshtastic_device_name)
             )
 
+            # Store the device address for future cleanup
+            try:
+                if hasattr(self.interface, 'bleak_client') and self.interface.bleak_client:
+                    self._device_address = self.interface.bleak_client.address
+                    logger.info(f"[CONN] Stored device address: {self._device_address}")
+            except Exception as e:
+                logger.debug(f"[CONN] Could not store device address: {e}")
+
             self._my_info = self.interface.myInfo
             self._metadata = self.interface.metadata
             self._nodes = self.interface.nodes
             self._connected = True
             self._intentional_disconnect = False  # Reset on successful connect
+            self._close_failed = False  # Clear any previous close failures
 
             logger.info(f"[CONN] Connected! My node num: {self.my_node_num}")
 
@@ -321,18 +522,71 @@ class MeshtasticClient:
             error_msg = str(e)
             logger.error(f"[CONN] Failed to connect: {error_msg}")
             self._connected = False
-            self._last_error = error_msg
+
+            # If device not found, do a scan and provide better error message
+            if "not found" in error_msg.lower() or "no meshtastic" in error_msg.lower():
+                logger.info("[CONN] Device not found, scanning to show available devices...")
+                try:
+                    scan_result = await self.scan_ble_devices()
+                    self._last_scan_result = scan_result
+                    self._last_error = self._format_device_not_found_error(scan_result)
+                except Exception as scan_err:
+                    logger.error(f"[CONN] Scan failed: {scan_err}")
+                    self._last_error = error_msg
+            else:
+                self._last_error = error_msg
+
             return False
 
     @property
     def last_error(self) -> Optional[str]:
         return self._last_error
 
+    @property
+    def last_scan_result(self) -> Optional[dict]:
+        return self._last_scan_result
+
+    def _format_device_not_found_error(self, scan_result: dict) -> str:
+        """Format a helpful error message when device is not found."""
+        configured = scan_result.get("configured_device", "Unknown")
+        meshtastic_devices = scan_result.get("meshtastic_devices", [])
+
+        if meshtastic_devices:
+            device_names = [d["name"] for d in meshtastic_devices]
+            return (f"Device '{configured}' not found. "
+                   f"Found {len(meshtastic_devices)} other Meshtastic device(s): {', '.join(device_names)}. "
+                   f"Check your MESHTASTIC_DEVICE_NAME setting.")
+        else:
+            return (f"Device '{configured}' not found and no Meshtastic devices visible. "
+                   f"Make sure the device is powered on and BLE is enabled. "
+                   f"Try Reset BLE or restart the server.")
+
     async def connect(self) -> bool:
         """Connect to the Meshtastic device via BLE."""
         async with self._lock:
             if self.connected:
                 return True
+
+            # If previous close failed, try to clean up BLE first
+            if self._close_failed:
+                logger.info("[CONN] Previous disconnect had issues, attempting BLE cleanup...")
+
+                # First, try force cleanup if we have a device address
+                if self._device_address:
+                    await self._force_ble_cleanup()
+                    await asyncio.sleep(2)  # Give BLE time to settle
+
+                # Check if device is now visible
+                found = await self._scan_for_device()
+                if not found:
+                    logger.warning("[CONN] Device still not visible after cleanup")
+                    # Get scan results to show user what's available
+                    scan_result = await self.scan_ble_devices()
+                    self._last_scan_result = scan_result
+                    self._last_error = self._format_device_not_found_error(scan_result)
+                    return False
+
+                self._close_failed = False
 
             # User is requesting connection, so clear intentional disconnect flag
             self._intentional_disconnect = False
@@ -344,45 +598,72 @@ class MeshtasticClient:
 
         # Set flag BEFORE disconnecting to prevent auto-reconnect
         self._intentional_disconnect = True
+        self._close_failed = False  # Track if close had issues
 
         async with self._lock:
+            # Unsubscribe from events FIRST to prevent callbacks during close
+            try:
+                pub.unsubscribe(self._on_receive, "meshtastic.receive")
+                pub.unsubscribe(self._on_connection, "meshtastic.connection.established")
+                pub.unsubscribe(self._on_disconnect, "meshtastic.connection.lost")
+            except Exception:
+                pass
+
             if not self.interface:
                 logger.info("[CONN] No active interface to disconnect")
                 self._connected = False
                 return
 
             if self.interface:
+                interface_to_close = self.interface
+
+                # Store the device address before closing for potential cleanup
+                try:
+                    if hasattr(interface_to_close, 'bleak_client') and interface_to_close.bleak_client:
+                        self._device_address = interface_to_close.bleak_client.address
+                        logger.info(f"[CONN] Stored device address for cleanup: {self._device_address}")
+                except Exception:
+                    pass
+
+                # Clear our reference immediately to prevent race conditions
+                self.interface = None
+                self._connected = False
+                self._my_info = None
+                self._metadata = None
+                self._nodes = {}
+
                 try:
                     logger.info("Closing BLE interface...")
                     # Close with timeout to prevent hanging
                     loop = asyncio.get_event_loop()
                     await asyncio.wait_for(
-                        loop.run_in_executor(None, self.interface.close),
+                        loop.run_in_executor(None, interface_to_close.close),
                         timeout=5.0
                     )
                     logger.info("BLE interface closed successfully")
                 except asyncio.TimeoutError:
-                    logger.warning("BLE close timed out, forcing disconnect")
+                    logger.warning("BLE close timed out - attempting force cleanup...")
+                    self._close_failed = True
+
+                    # Try force cleanup using bleak directly
+                    if self._device_address:
+                        cleanup_success = await self._force_ble_cleanup()
+                        if cleanup_success:
+                            logger.info("Force BLE cleanup successful")
+                            self._close_failed = False
+                        else:
+                            logger.warning("Force cleanup failed - device may need server restart")
+                            self._last_error = "BLE close timed out - try Reset BLE or restart server"
+                    else:
+                        self._last_error = "BLE close timed out - device may need time to release"
+
                 except Exception as e:
                     logger.error(f"Error disconnecting: {e}")
+                    self._close_failed = True
                 finally:
-                    self.interface = None
-                    self._connected = False
-                    self._my_info = None
-                    self._metadata = None
-                    self._nodes = {}
-
                     # Emit disconnection event BEFORE clearing main_loop
                     self._schedule_event("connection", self.get_connection_status())
-
                     self._main_loop = None
-
-                    try:
-                        pub.unsubscribe(self._on_receive, "meshtastic.receive")
-                        pub.unsubscribe(self._on_connection, "meshtastic.connection.established")
-                        pub.unsubscribe(self._on_disconnect, "meshtastic.connection.lost")
-                    except Exception:
-                        pass
 
     def _create_ack_callback(self, destination: str, text: str):
         """Create a callback function for ACK/NAK handling."""
