@@ -43,6 +43,19 @@ A real-time web dashboard for monitoring and interacting with your Meshtastic me
 - **Hardware Info** - Device model, battery level, signal strength
 - **Location Data** - GPS coordinates with altitude
 
+### Live Console
+- **Real-Time Events** - View all WebSocket messages from your device as they happen
+- **Expandable Data** - Explore nested JSON data like browser dev tools
+- **Event Filtering** - Filter by event type (message, position, telemetry, etc.)
+- **Pause/Resume** - Freeze updates to inspect data without it scrolling away
+- **Dashboard Widget** - Quick view of recent events on the main dashboard
+
+### Connection Management
+- **BLE Device Scanning** - Scan for available devices with Meshtastic devices highlighted
+- **Reconnect Button** - Quick disconnect/reconnect cycle without multiple clicks
+- **BLE Reset** - Force cleanup of stuck BLE connections
+- **Connection Recovery** - Helpful error messages showing available devices when connection fails
+
 ## Architecture
 
 ```
@@ -190,6 +203,8 @@ tail -f backend/logs/meshtastic_dashboard.log
 | `/api/connection/status` | GET | Get connection status |
 | `/api/connection/connect` | POST | Connect to device |
 | `/api/connection/disconnect` | POST | Disconnect from device |
+| `/api/connection/reset` | POST | Reset BLE connection (force cleanup) |
+| `/api/connection/scan` | GET | Scan for available BLE devices |
 | `/api/nodes` | GET | Get all nodes |
 | `/api/nodes/live` | GET | Get live node data from device |
 | `/api/nodes/{id}/traceroute` | POST | Send traceroute to a node |
@@ -229,8 +244,11 @@ This dashboard:
 
 1. Ensure Bluetooth is enabled on your computer
 2. Make sure no other app (like the Meshtastic phone app) is connected to the device
-3. Try power cycling your Meshtastic device
-4. Check that the device name in `.env` matches exactly
+3. Use **Scan for Devices** to see available BLE devices and verify your device is visible
+4. If connection gets stuck, use the **Reset BLE** button to force cleanup
+5. Try the **Reconnect** button for a quick disconnect/connect cycle
+6. Try power cycling your Meshtastic device
+7. Check that the device name in `.env` matches exactly (use scan results to verify)
 
 ### Database Connection Issues
 
