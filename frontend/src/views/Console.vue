@@ -1,6 +1,6 @@
 <template>
-  <div class="h-full flex flex-col">
-    <header class="flex items-center justify-between mb-4">
+  <div class="flex flex-col" style="height: calc(100vh - 3rem);">
+    <header class="flex items-center justify-between mb-4 flex-shrink-0">
       <div>
         <h1 class="text-2xl font-bold text-white">Console</h1>
         <p class="text-gray-400">Live data stream from Meshtastic device</p>
@@ -11,7 +11,7 @@
     </header>
 
     <!-- Toolbar -->
-    <div class="flex items-center gap-4 mb-4 bg-gray-800 rounded-lg p-3 border border-gray-700">
+    <div class="flex items-center gap-4 mb-4 bg-gray-800 rounded-lg p-3 border border-gray-700 flex-shrink-0">
       <!-- Filter -->
       <div class="flex-1 relative">
         <input
@@ -87,7 +87,7 @@
     <!-- Console Output -->
     <div
       ref="consoleContainer"
-      class="flex-1 overflow-y-auto bg-gray-900 rounded-lg border border-gray-700 font-mono text-sm"
+      class="flex-1 min-h-0 overflow-y-auto bg-gray-900 rounded-lg border border-gray-700 font-mono text-sm"
     >
       <div v-if="consoleStore.filteredLogs.length === 0" class="text-gray-500 text-center py-8">
         <svg class="w-12 h-12 mx-auto mb-3 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -157,7 +157,7 @@
     </div>
 
     <!-- Status Bar -->
-    <div class="mt-4 flex items-center justify-between text-xs text-gray-500">
+    <div class="mt-4 flex items-center justify-between text-xs text-gray-500 flex-shrink-0">
       <div class="flex items-center gap-4">
         <span v-for="(count, type) in consoleStore.stats" :key="type" class="flex items-center gap-1">
           <span class="w-2 h-2 rounded-full" :class="getTypeColor(type)"></span>
@@ -186,7 +186,7 @@ const consoleStore = useConsoleStore()
 const consoleContainer = ref(null)
 const filterText = ref('')
 
-const commonTypes = ['message', 'position', 'telemetry', 'node_update', 'connection']
+const commonTypes = ['message', 'position', 'telemetry', 'routing', 'neighborinfo', 'node_update']
 
 // Scroll to bottom helper
 function scrollToBottom() {
@@ -246,6 +246,15 @@ function getTypeBadgeClass(type) {
     'ack': 'bg-emerald-900 text-emerald-300',
     'traceroute': 'bg-orange-900 text-orange-300',
     'traceroute_error': 'bg-red-900 text-red-300',
+    'routing': 'bg-indigo-900 text-indigo-300',
+    'neighborinfo': 'bg-pink-900 text-pink-300',
+    'waypoint': 'bg-amber-900 text-amber-300',
+    'admin': 'bg-red-900 text-red-300',
+    'range_test': 'bg-lime-900 text-lime-300',
+    'store_forward': 'bg-teal-900 text-teal-300',
+    'detection_sensor': 'bg-rose-900 text-rose-300',
+    'paxcounter': 'bg-fuchsia-900 text-fuchsia-300',
+    'raw_packet': 'bg-slate-700 text-slate-300',
     'pong': 'bg-gray-700 text-gray-400',
     'ping': 'bg-gray-700 text-gray-400',
     'send_message': 'bg-green-900 text-green-300',
@@ -262,6 +271,15 @@ function getTypeColor(type) {
     'node_update': 'bg-cyan-500',
     'ack': 'bg-emerald-500',
     'traceroute': 'bg-orange-500',
+    'routing': 'bg-indigo-500',
+    'neighborinfo': 'bg-pink-500',
+    'waypoint': 'bg-amber-500',
+    'admin': 'bg-red-500',
+    'range_test': 'bg-lime-500',
+    'store_forward': 'bg-teal-500',
+    'detection_sensor': 'bg-rose-500',
+    'paxcounter': 'bg-fuchsia-500',
+    'raw_packet': 'bg-slate-500',
   }
   return colors[type] || 'bg-gray-500'
 }

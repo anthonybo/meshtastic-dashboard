@@ -49,26 +49,39 @@
       <div
         v-for="log in consoleStore.recentLogs"
         :key="log.id"
-        class="flex gap-2 hover:bg-gray-800 rounded px-1 py-0.5 cursor-pointer"
-        @click="consoleStore.toggleExpanded(log.id)"
+        class="hover:bg-gray-800 rounded"
       >
-        <!-- Direction indicator -->
-        <span :class="log.direction === 'in' ? 'text-green-500' : 'text-blue-500'">
-          {{ log.direction === 'in' ? '←' : '→' }}
-        </span>
-        <!-- Timestamp -->
-        <span class="text-gray-600 flex-shrink-0">{{ formatTime(log.timestamp) }}</span>
-        <!-- Type badge -->
-        <span
-          class="px-1.5 py-0.5 rounded text-xs flex-shrink-0"
-          :class="getTypeBadgeClass(log.type)"
+        <!-- Log row -->
+        <div
+          class="flex gap-2 px-1 py-0.5 cursor-pointer"
+          @click="consoleStore.toggleExpanded(log.id)"
         >
-          {{ log.type }}
-        </span>
-        <!-- Preview -->
-        <span class="text-gray-300 truncate flex-1">
-          {{ getPreview(log.data) }}
-        </span>
+          <!-- Expand indicator -->
+          <span class="text-gray-500 flex-shrink-0">
+            {{ log.expanded ? '▼' : '▶' }}
+          </span>
+          <!-- Direction indicator -->
+          <span :class="log.direction === 'in' ? 'text-green-500' : 'text-blue-500'">
+            {{ log.direction === 'in' ? '←' : '→' }}
+          </span>
+          <!-- Timestamp -->
+          <span class="text-gray-600 flex-shrink-0">{{ formatTime(log.timestamp) }}</span>
+          <!-- Type badge -->
+          <span
+            class="px-1.5 py-0.5 rounded text-xs flex-shrink-0"
+            :class="getTypeBadgeClass(log.type)"
+          >
+            {{ log.type }}
+          </span>
+          <!-- Preview -->
+          <span class="text-gray-300 truncate flex-1">
+            {{ getPreview(log.data) }}
+          </span>
+        </div>
+        <!-- Expanded content -->
+        <div v-if="log.expanded" class="ml-4 mb-2 p-2 bg-gray-950 rounded">
+          <JsonTree :data="log.data" :depth="0" />
+        </div>
       </div>
     </div>
 
@@ -91,8 +104,9 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useConsoleStore } from '../stores/console'
+import JsonTree from './JsonTree.vue'
 
 const consoleStore = useConsoleStore()
 const consoleContainer = ref(null)
@@ -110,6 +124,12 @@ function scrollToBottom() {
     consoleContainer.value.scrollTop = consoleContainer.value.scrollHeight
   }
 }
+
+// Scroll to bottom on mount
+onMounted(() => {
+  setTimeout(scrollToBottom, 100)
+  setTimeout(scrollToBottom, 300)
+})
 
 // Auto-scroll when new logs arrive
 watch(() => consoleStore.logs.length, () => {
@@ -154,6 +174,15 @@ function getTypeBadgeClass(type) {
     'node_update': 'bg-cyan-900 text-cyan-300',
     'ack': 'bg-emerald-900 text-emerald-300',
     'traceroute': 'bg-orange-900 text-orange-300',
+    'routing': 'bg-indigo-900 text-indigo-300',
+    'neighborinfo': 'bg-pink-900 text-pink-300',
+    'waypoint': 'bg-amber-900 text-amber-300',
+    'admin': 'bg-red-900 text-red-300',
+    'range_test': 'bg-lime-900 text-lime-300',
+    'store_forward': 'bg-teal-900 text-teal-300',
+    'detection_sensor': 'bg-rose-900 text-rose-300',
+    'paxcounter': 'bg-fuchsia-900 text-fuchsia-300',
+    'raw_packet': 'bg-slate-700 text-slate-300',
     'pong': 'bg-gray-700 text-gray-400',
     'ping': 'bg-gray-700 text-gray-400',
     'send_message': 'bg-green-900 text-green-300',
@@ -170,6 +199,15 @@ function getTypeColor(type) {
     'node_update': 'bg-cyan-500',
     'ack': 'bg-emerald-500',
     'traceroute': 'bg-orange-500',
+    'routing': 'bg-indigo-500',
+    'neighborinfo': 'bg-pink-500',
+    'waypoint': 'bg-amber-500',
+    'admin': 'bg-red-500',
+    'range_test': 'bg-lime-500',
+    'store_forward': 'bg-teal-500',
+    'detection_sensor': 'bg-rose-500',
+    'paxcounter': 'bg-fuchsia-500',
+    'raw_packet': 'bg-slate-500',
   }
   return colors[type] || 'bg-gray-500'
 }

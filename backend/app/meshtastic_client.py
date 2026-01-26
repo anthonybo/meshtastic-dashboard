@@ -268,6 +268,7 @@ class MeshtasticClient:
             decoded = packet.get("decoded", {})
             portnum = decoded.get("portnum")
             from_id = packet.get("fromId", "unknown")
+            to_id = packet.get("toId", "unknown")
 
             # Log all received packets for debugging
             logger.debug(f"Received packet from {from_id}: portnum={portnum}")
@@ -282,6 +283,25 @@ class MeshtasticClient:
                 self._handle_nodeinfo(packet)
             elif portnum == "TRACEROUTE_APP":
                 self._handle_traceroute(packet)
+            elif portnum == "ROUTING_APP":
+                self._handle_routing(packet)
+            elif portnum == "NEIGHBORINFO_APP":
+                self._handle_neighborinfo(packet)
+            elif portnum == "WAYPOINT_APP":
+                self._handle_waypoint(packet)
+            elif portnum == "ADMIN_APP":
+                self._handle_admin(packet)
+            elif portnum == "RANGE_TEST_APP":
+                self._handle_range_test(packet)
+            elif portnum == "STORE_FORWARD_APP":
+                self._handle_store_forward(packet)
+            elif portnum == "DETECTION_SENSOR_APP":
+                self._handle_detection_sensor(packet)
+            elif portnum == "PAXCOUNTER_APP":
+                self._handle_paxcounter(packet)
+            else:
+                # Forward any unhandled packet types to the console for visibility
+                self._handle_unknown_packet(packet, portnum)
         except Exception as e:
             logger.error(f"Error handling packet: {e}")
 
@@ -323,20 +343,75 @@ class MeshtasticClient:
             })
 
     def _handle_telemetry(self, packet):
-        """Handle telemetry updates."""
+        """Handle telemetry updates - device, environment, air quality, and power metrics."""
         decoded = packet.get("decoded", {})
         telemetry = decoded.get("telemetry", {})
         from_id = packet.get("fromId")
-        device_metrics = telemetry.get("deviceMetrics", {})
 
+        # Device metrics (battery, utilization, uptime)
+        device_metrics = telemetry.get("deviceMetrics", {})
         if device_metrics:
             self._schedule_event("telemetry", {
                 "node_id": from_id,
+                "type": "device",
                 "battery_level": device_metrics.get("batteryLevel"),
                 "voltage": device_metrics.get("voltage"),
                 "channel_utilization": device_metrics.get("channelUtilization"),
                 "air_util_tx": device_metrics.get("airUtilTx"),
                 "uptime_seconds": device_metrics.get("uptimeSeconds"),
+                "timestamp": datetime.now().isoformat()
+            })
+
+        # Environment metrics (temperature, humidity, pressure)
+        environment_metrics = telemetry.get("environmentMetrics", {})
+        if environment_metrics:
+            self._schedule_event("telemetry", {
+                "node_id": from_id,
+                "type": "environment",
+                "temperature": environment_metrics.get("temperature"),
+                "relative_humidity": environment_metrics.get("relativeHumidity"),
+                "barometric_pressure": environment_metrics.get("barometricPressure"),
+                "gas_resistance": environment_metrics.get("gasResistance"),
+                "iaq": environment_metrics.get("iaq"),
+                "distance": environment_metrics.get("distance"),
+                "lux": environment_metrics.get("lux"),
+                "white_lux": environment_metrics.get("whiteLux"),
+                "ir_lux": environment_metrics.get("irLux"),
+                "uv_lux": environment_metrics.get("uvLux"),
+                "wind_direction": environment_metrics.get("windDirection"),
+                "wind_speed": environment_metrics.get("windSpeed"),
+                "weight": environment_metrics.get("weight"),
+                "timestamp": datetime.now().isoformat()
+            })
+
+        # Air quality metrics
+        air_quality_metrics = telemetry.get("airQualityMetrics", {})
+        if air_quality_metrics:
+            self._schedule_event("telemetry", {
+                "node_id": from_id,
+                "type": "air_quality",
+                "pm10": air_quality_metrics.get("pm10Standard"),
+                "pm25": air_quality_metrics.get("pm25Standard"),
+                "pm100": air_quality_metrics.get("pm100Standard"),
+                "pm10_env": air_quality_metrics.get("pm10Environmental"),
+                "pm25_env": air_quality_metrics.get("pm25Environmental"),
+                "pm100_env": air_quality_metrics.get("pm100Environmental"),
+                "co2": air_quality_metrics.get("co2"),
+                "timestamp": datetime.now().isoformat()
+            })
+
+        # Power metrics
+        power_metrics = telemetry.get("powerMetrics", {})
+        if power_metrics:
+            self._schedule_event("telemetry", {
+                "node_id": from_id,
+                "type": "power",
+                "ch1_voltage": power_metrics.get("ch1Voltage"),
+                "ch1_current": power_metrics.get("ch1Current"),
+                "ch2_voltage": power_metrics.get("ch2Voltage"),
+                "ch2_current": power_metrics.get("ch2Current"),
+                "ch3_voltage": power_metrics.get("ch3Voltage"),
+                "ch3_current": power_metrics.get("ch3Current"),
                 "timestamp": datetime.now().isoformat()
             })
 
@@ -395,6 +470,148 @@ class MeshtasticClient:
             "timestamp": datetime.now().isoformat()
         })
 
+    def _handle_routing(self, packet):
+        """Handle routing/ACK packets."""
+        decoded = packet.get("decoded", {})
+        routing = decoded.get("routing", {})
+        from_id = packet.get("fromId")
+        to_id = packet.get("toId")
+        request_id = packet.get("requestId")
+
+        error_reason = routing.get("errorReason", "NONE")
+
+        self._schedule_event("routing", {
+            "from_node_id": from_id,
+            "to_node_id": to_id,
+            "request_id": request_id,
+            "error_reason": error_reason,
+            "raw": routing,
+            "timestamp": datetime.now().isoformat()
+        })
+
+    def _handle_neighborinfo(self, packet):
+        """Handle neighbor info packets - shows mesh topology."""
+        decoded = packet.get("decoded", {})
+        neighborinfo = decoded.get("neighborinfo", {})
+        from_id = packet.get("fromId")
+
+        neighbors = neighborinfo.get("neighbors", [])
+        node_broadcast_interval_secs = neighborinfo.get("nodeBroadcastIntervalSecs")
+
+        # Format neighbor data
+        formatted_neighbors = []
+        for neighbor in neighbors:
+            formatted_neighbors.append({
+                "node_id": f"!{neighbor.get('nodeId', 0):08x}" if isinstance(neighbor.get('nodeId'), int) else neighbor.get('nodeId'),
+                "snr": neighbor.get("snr"),
+            })
+
+        logger.info(f"NeighborInfo from {from_id}: {len(formatted_neighbors)} neighbors")
+
+        self._schedule_event("neighborinfo", {
+            "from_node_id": from_id,
+            "neighbors": formatted_neighbors,
+            "node_broadcast_interval_secs": node_broadcast_interval_secs,
+            "timestamp": datetime.now().isoformat()
+        })
+
+    def _handle_waypoint(self, packet):
+        """Handle waypoint packets."""
+        decoded = packet.get("decoded", {})
+        waypoint = decoded.get("waypoint", {})
+        from_id = packet.get("fromId")
+
+        self._schedule_event("waypoint", {
+            "from_node_id": from_id,
+            "id": waypoint.get("id"),
+            "name": waypoint.get("name"),
+            "description": waypoint.get("description"),
+            "latitude": waypoint.get("latitudeI", 0) / 1e7 if waypoint.get("latitudeI") else None,
+            "longitude": waypoint.get("longitudeI", 0) / 1e7 if waypoint.get("longitudeI") else None,
+            "expire": waypoint.get("expire"),
+            "icon": waypoint.get("icon"),
+            "timestamp": datetime.now().isoformat()
+        })
+
+    def _handle_admin(self, packet):
+        """Handle admin packets."""
+        decoded = packet.get("decoded", {})
+        from_id = packet.get("fromId")
+
+        self._schedule_event("admin", {
+            "from_node_id": from_id,
+            "raw": decoded,
+            "timestamp": datetime.now().isoformat()
+        })
+
+    def _handle_range_test(self, packet):
+        """Handle range test packets."""
+        decoded = packet.get("decoded", {})
+        from_id = packet.get("fromId")
+
+        self._schedule_event("range_test", {
+            "from_node_id": from_id,
+            "payload": decoded.get("payload"),
+            "timestamp": datetime.now().isoformat()
+        })
+
+    def _handle_store_forward(self, packet):
+        """Handle store and forward packets."""
+        decoded = packet.get("decoded", {})
+        from_id = packet.get("fromId")
+
+        self._schedule_event("store_forward", {
+            "from_node_id": from_id,
+            "raw": decoded,
+            "timestamp": datetime.now().isoformat()
+        })
+
+    def _handle_detection_sensor(self, packet):
+        """Handle detection sensor packets."""
+        decoded = packet.get("decoded", {})
+        from_id = packet.get("fromId")
+
+        self._schedule_event("detection_sensor", {
+            "from_node_id": from_id,
+            "raw": decoded,
+            "timestamp": datetime.now().isoformat()
+        })
+
+    def _handle_paxcounter(self, packet):
+        """Handle paxcounter (people counter) packets."""
+        decoded = packet.get("decoded", {})
+        paxcounter = decoded.get("paxcounter", {})
+        from_id = packet.get("fromId")
+
+        self._schedule_event("paxcounter", {
+            "from_node_id": from_id,
+            "wifi": paxcounter.get("wifi"),
+            "ble": paxcounter.get("ble"),
+            "uptime": paxcounter.get("uptime"),
+            "timestamp": datetime.now().isoformat()
+        })
+
+    def _handle_unknown_packet(self, packet, portnum):
+        """Handle any unrecognized packet types - forward to console for visibility."""
+        decoded = packet.get("decoded", {})
+        from_id = packet.get("fromId", "unknown")
+        to_id = packet.get("toId", "unknown")
+
+        logger.info(f"Unknown packet type '{portnum}' from {from_id}")
+
+        # Forward the raw packet data so users can see what's available
+        self._schedule_event("raw_packet", {
+            "portnum": portnum,
+            "from_node_id": from_id,
+            "to_node_id": to_id,
+            "decoded": decoded,
+            "rx_time": packet.get("rxTime"),
+            "rx_snr": packet.get("rxSnr"),
+            "rx_rssi": packet.get("rxRssi"),
+            "hop_limit": packet.get("hopLimit"),
+            "hop_start": packet.get("hopStart"),
+            "timestamp": datetime.now().isoformat()
+        })
 
     def _on_connection(self, interface, topic=pub.AUTO_TOPIC):
         """Handle connection events from BLE library."""
